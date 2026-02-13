@@ -1,5 +1,13 @@
+<!--
+TODO:
+- add timer lines above graph
+- loop
+- precision setting
+
+-->
+
 <script setup>
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 
 const AudioRef = ref(null);
 const CanvasRef = ref(null);
@@ -12,9 +20,16 @@ const audioCtx = new AudioContext();
 const playProgress = ref(0); //progress of the audio file
 const audioDuration = ref(0); //duration of audio file
 const audioCurrent = ref(0); //current time of audio
+const trimStart = ref(0); //starting point
+const trimEnd = ref(0); //ending point
+const dragHandle = ref(null); //which handle is being dragged
+const disabledClick = ref(false); //if seeking click is disabled
+const dragStartTimer = ref(0); //timer for dragged trim start
+const dragEndTimer = ref(0); //timer for dragged trim end
 
 let animationId = null; //used for audio progress animation
 let animationId2 = null; //used for timer progress
+let animationId3 = null; //used for audio play ending for trim end
 
 //process uploaded file
 async function decodeFile(file) 
@@ -154,6 +169,7 @@ function togglePlay()
     if(!audioPlaying.value)
     {
         AudioRef.value.play();
+        monitorPlayback();
         audioPlaying.value = true;
     }
     else
@@ -208,19 +224,26 @@ function endPlay()
     cancelAnimationFrame(animationId);
     cancelAnimationFrame(animationId2);
     audioPlaying.value = false;
-    audioCurrent.value = 0;
-    playProgress.value = 0;
+    audioCurrent.value = trimStart.value;
+    playProgress.value = (audioCurrent.value / audioDuration.value) * ContainerRef.value.clientWidth;
 }
 
 //skip through audio by clicking
 function seek(e) {
-    if (!fileAdded.value) return;
+    if(!fileAdded.value) return;
+    if(disabledClick.value) return;
     const audio = AudioRef.value;
     const container = ContainerRef.value;
     const rect = container.getBoundingClientRect();
 
     const clickX = e.clientX - rect.left;
-    const percent = clickX / rect.width;
+    let percent = clickX / rect.width;
+
+    const min = startPercent.value / 100;
+    const max = endPercent.value / 100;
+
+    //value is set between min and max based on trim sliders
+    percent = Math.min(Math.max(percent, min), max);
 
     audio.currentTime = percent * audio.duration;
     playProgress.value = (audio.currentTime / audio.duration) * container.clientWidth;
@@ -232,6 +255,7 @@ function seek(e) {
 function setDuration(e)
 {
     audioDuration.value = e.target.duration;
+    trimEnd.value = audioDuration.value;
 }
 
 //Format seconds to mm:ss.M
@@ -242,6 +266,94 @@ function formatTime(sec) {
     const tenths = Math.floor((sec % 1) * 10);
     return `${minutes}:${seconds.toString().padStart(2,'0')}.${tenths}`;
 }
+
+//start drag on trim handle
+function startDrag(type) 
+{
+  dragHandle.value = type;
+  disabledClick.value = true;
+  window.addEventListener('mousemove', onDrag);
+  window.addEventListener('mouseup', stopDrag);
+}
+
+//drag logic
+function onDrag(e) 
+{
+  if (!dragHandle.value) return;
+
+  const container = ContainerRef.value;
+  const rect = container.getBoundingClientRect();
+
+  let percent = (e.clientX - rect.left) / rect.width;
+  percent = Math.min(Math.max(0, percent), 1);
+
+  const newTime = percent * audioDuration.value;
+
+  if (dragHandle.value === 'start') 
+  {
+    dragStartTimer.value = formatTime(newTime);
+    trimStart.value = Math.min(newTime, trimEnd.value - 0.1);
+
+    //keep current audio marker inside trim limits
+    if(trimStart.value > audioCurrent.value)
+    {
+        AudioRef.value.currentTime = trimStart.value;
+        audioCurrent.value = trimStart.value;
+        playProgress.value = (audioCurrent.value / audioDuration.value) * container.clientWidth;
+    }
+  }
+
+  if (dragHandle.value === 'end') 
+  {
+    dragEndTimer.value = formatTime(newTime);
+    trimEnd.value = Math.max(newTime, trimStart.value + 0.1);
+
+    if(trimEnd.value < audioCurrent.value)
+    {
+        audioCurrent.value = trimEnd.value;
+        playProgress.value = playProgress.value = (audioCurrent.value / audioDuration.value) * container.clientWidth;
+    }
+  }
+}
+
+//stop drag event
+function stopDrag() 
+{
+    dragHandle.value = null;
+    window.removeEventListener('mousemove', onDrag);
+    window.removeEventListener('mouseup', stopDrag);
+    
+    //enable click for seeking after 5ms
+    setTimeout(() => {
+        disabledClick.value = false;
+    }, 5)
+}
+
+//stops audio playing at ending trim marker
+function monitorPlayback() {
+  const audio = AudioRef.value;
+  if(!audio) return;
+
+  if(audio.currentTime >= trimEnd.value) 
+  {
+    audio.pause();
+    audio.currentTime = trimStart.value;
+    audioPlaying.value = false;
+    cancelAnimationFrame(animationId3);
+    return;
+  }
+
+  animationId3 = requestAnimationFrame(monitorPlayback)
+}
+
+//trim handle positions
+const startPercent = computed(() =>
+  (trimStart.value / audioDuration.value) * 100
+);
+
+const endPercent = computed(() =>
+  (trimEnd.value / audioDuration.value) * 100
+);
 
 </script>
 
@@ -268,8 +380,16 @@ function formatTime(sec) {
             </label>
             <audio ref="AudioRef" accept="audio/*" hidden @play="startPlay" @pause="pausePlay" @ended="endPlay" @loadedmetadata="setDuration"></audio>
 
+            <div class="trim-overlay left" :style="{ width: startPercent + '%' }" v-if="fileAdded"></div>
+            <div class="trim-handle start" :style="{ left: startPercent + '%' }"@mousedown.stop="startDrag('start')" v-if="fileAdded">
+                <div class="trim-timer">{{dragStartTimer}}</div>
+            </div>
             <canvas ref="CanvasRef" class="canvas"></canvas>
             <div class="progress-bar" v-if="fileAdded" :style="{ left: playProgress + 'px' }"></div>
+            <div class="trim-handle end" :style="{ left: endPercent + '%' }" draggable="false" @mousedown.stop="startDrag('end')" v-if="fileAdded">
+                <div class="trim-timer">{{dragEndTimer}}</div>
+            </div>
+            <div class="trim-overlay right" :style="{ width: (100 - endPercent) + '%' }" v-if="fileAdded"></div>
         </div>
     </div>
 </template>
@@ -287,7 +407,7 @@ function formatTime(sec) {
 {
     display: flex;
     justify-content: center;
-    padding: 10px 0px;
+    padding: 20px 0px 30px 0px;
 }
 
 .audio-visual
@@ -351,6 +471,66 @@ canvas
   height: 100%;
   background: red;
   pointer-events: none;
+}
+
+.trim-handle 
+{
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 100%;
+  background: blue;
+  cursor: ew-resize;
+  transform: translateX(-50%);
+  z-index: 20;
+}
+
+.trim-timer
+{
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-bottom: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-family: sans-serif;
+    border-radius: 4px;
+    white-space: nowrap;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    user-select: none;
+}
+
+.trim-timer::after 
+{
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 5px;
+  border-style: solid;
+  border-color: white transparent transparent transparent;
+}
+
+.trim-overlay
+{
+    position: absolute;
+    height: 100%;
+    top: 0;
+    opacity: .3;
+    background-color: black;
+    z-index: 9;
+}
+
+.left
+{
+    left: 0;
+}
+
+.right
+{
+    right: 0;
 }
 
 </style>
