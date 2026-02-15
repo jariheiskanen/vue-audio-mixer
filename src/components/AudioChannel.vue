@@ -1,8 +1,9 @@
 <!--
 TODO:
-- add timer lines above graph
-- loop
-- precision setting
+- graph timer marker scaling dynamically
+- rescale canvas on window resize
+- precision setting eg. (1.52s)
+- set trim/current timer manually
 
 -->
 
@@ -26,6 +27,7 @@ const dragHandle = ref(null); //which handle is being dragged
 const disabledClick = ref(false); //if seeking click is disabled
 const dragStartTimer = ref(0); //timer for dragged trim start
 const dragEndTimer = ref(0); //timer for dragged trim end
+const loopEnabled = ref(false); //enabled looping setting
 
 let animationId = null; //used for audio progress animation
 let animationId2 = null; //used for timer progress
@@ -112,7 +114,6 @@ function drawVolumeGraph(canvas, data)
 
     //clear canvas
     ctx.clearRect(0, 0, width, height);
-
     
     //draw a line for each sample, close and fill the graph
     ctx.beginPath();
@@ -131,6 +132,39 @@ function drawVolumeGraph(canvas, data)
     ctx.closePath();
     ctx.fillStyle = "#0da90d";
     ctx.fill();
+
+    drawMarkers(ctx, width, height);
+}
+
+//draw timer markers
+function drawMarkers(ctx, width, height) 
+{
+    const interval = 1; //interval of markers in seconds
+    const min_spacing = 50; //minimum allowed distance between markers
+
+    //line styling
+    ctx.fillStyle = '#888';
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    ctx.font = '10px sans-serif';
+
+    let last_drawn_x = 0 - min_spacing;
+    for(let time=0; time<=audioDuration.value; time+=interval) 
+    {
+        const x = (time/audioDuration.value)*width;
+        if(last_drawn_x + min_spacing <= x)
+        {
+            // Draw tick line
+            ctx.beginPath();
+            ctx.moveTo(x, height - 15);
+            ctx.lineTo(x, height);
+            ctx.stroke();
+
+            // Draw label
+            ctx.fillText(time, x + 2, height - 18);
+            last_drawn_x = x;
+        }
+    }
 }
 
 //file upload
@@ -336,14 +370,22 @@ function monitorPlayback() {
 
   if(audio.currentTime >= trimEnd.value) 
   {
-    audio.pause();
-    audio.currentTime = trimStart.value;
-    audioPlaying.value = false;
-    cancelAnimationFrame(animationId3);
-    return;
+    //if looping is enabled, don't pause at the end
+    if(loopEnabled.value)
+    {
+        audio.currentTime = trimStart.value;
+    }
+    else
+    {
+        audio.pause();
+        audio.currentTime = trimStart.value;
+        audioPlaying.value = false;
+        cancelAnimationFrame(animationId3);
+        return;
+    }    
   }
 
-  animationId3 = requestAnimationFrame(monitorPlayback)
+  animationId3 = requestAnimationFrame(monitorPlayback);
 }
 
 //trim handle positions
@@ -360,6 +402,13 @@ const endPercent = computed(() =>
 <template>
     <div class="channel">
         <div class="control-bar" v-if="fileAdded">
+
+            <div class="square-button" :class="{ active: loopEnabled }" @click="loopEnabled = !loopEnabled">
+                <svg width="20px" height="20px" viewBox="-24 0 512 512" xmlns="http://www.w3.org/2000/svg" >
+                    <path d="M232 448Q186 448 148 425 109 402 87 363 64 324 64 278L64 256 112 256 112 280Q112 331 147 366 182 400 233 400 265 400 293 384 320 367 336 340 352 313 352 281 352 230 318 195 283 160 232 160L232 232 136 136 232 40 232 112Q279 112 317 134 355 157 378 196 400 234 400 280 400 327 378 364 356 403 317 426 277 448 232 448Z" />
+                </svg>
+            </div>
+
             <div class="play-audio-wrapper" @click="togglePlay">
                 <svg v-if="!audioPlaying" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="20" height="20">
                     <path d="M5.716 49.715a2.272 2.272 0 0 0 2.306 -0.061l36.364 -22.727a2.273 2.273 0 0 0 0 -3.855L8.023 0.345A2.273 2.273 0 0 0 4.545 2.273v45.455a2.273 2.273 0 0 0 1.171 1.988"/>
@@ -384,7 +433,9 @@ const endPercent = computed(() =>
             <div class="trim-handle start" :style="{ left: startPercent + '%' }"@mousedown.stop="startDrag('start')" v-if="fileAdded">
                 <div class="trim-timer">{{dragStartTimer}}</div>
             </div>
+
             <canvas ref="CanvasRef" class="canvas"></canvas>
+
             <div class="progress-bar" v-if="fileAdded" :style="{ left: playProgress + 'px' }"></div>
             <div class="trim-handle end" :style="{ left: endPercent + '%' }" draggable="false" @mousedown.stop="startDrag('end')" v-if="fileAdded">
                 <div class="trim-timer">{{dragEndTimer}}</div>
@@ -407,7 +458,8 @@ const endPercent = computed(() =>
 {
     display: flex;
     justify-content: center;
-    padding: 20px 0px 30px 0px;
+    align-items: center;
+    padding: 20px 0px 30px 0px;    
 }
 
 .audio-visual
@@ -449,7 +501,9 @@ const endPercent = computed(() =>
 
 .play-audio-wrapper
 {
-    padding: 0px 10px;
+    padding: 5px 10px;
+    height: 20px;
+    width: 20px;
 }
 
 canvas
@@ -531,6 +585,31 @@ canvas
 .right
 {
     right: 0;
+}
+
+.square-button
+{
+    height: 20px;
+    width: 20px;
+    border-radius: 4px;
+    padding: 5px;
+    transition: all .15s ease;
+    cursor: pointer;
+}
+
+.square-button:hover {
+  background: #e9e9e9;
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.6),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.05);
+}
+
+.active
+{
+    background-color: #d8d8d8;
+    box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.6),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.05);
 }
 
 </style>
