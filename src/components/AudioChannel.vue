@@ -10,6 +10,7 @@ TODO:
 <script setup>
 import { ref, computed } from 'vue';
 
+const fileRef = ref(null);
 const AudioRef = ref(null);
 const CanvasRef = ref(null);
 const ContainerRef = ref(null);
@@ -17,17 +18,24 @@ const ContainerRef = ref(null);
 const showUpload = ref(true); //shows upload button when audio file hasn't been added
 const audioPlaying = ref(false); //true when audio file is being played
 const fileAdded = ref(false); //file added
+const fileName = ref(null); //name of the selected file
 const audioCtx = new AudioContext();
-const playProgress = ref(0); //progress of the audio file
-const audioDuration = ref(0); //duration of audio file
-const audioCurrent = ref(0); //current time of audio
-const trimStart = ref(0); //starting point
-const trimEnd = ref(0); //ending point
+
+const playProgress = ref(0); //progress of the audio file marker
+const audioDuration = ref(0); //duration of audio file in s
+const audioCurrent = ref(0); //current timer of audio in s
+
+const trimStart = ref(0); //starting point in s
+const trimEnd = ref(0); //ending point in s
 const dragHandle = ref(null); //which handle is being dragged
+
 const disabledClick = ref(false); //if seeking click is disabled
 const dragStartTimer = ref(0); //timer for dragged trim start
 const dragEndTimer = ref(0); //timer for dragged trim end
 const loopEnabled = ref(false); //enabled looping setting
+
+const cutStart = ref(0); //start of cut file in s
+const cutEnd = ref(0); //end of cut file in s
 
 let animationId = null; //used for audio progress animation
 let animationId2 = null; //used for timer progress
@@ -41,10 +49,12 @@ async function decodeFile(file)
 }
 
 //get volume data for file at set sample rate
-function getVolumeData(audioBuffer, samples = 500) 
+function getVolumeData(audioBuffer, samples = 500, startSample, endSample) 
 {
     const channelData = audioBuffer.getChannelData(0); // mono
-    const blockSize = Math.floor(channelData.length / samples);
+    const visibleData = channelData.slice(startSample, endSample);
+    const blockSize = Math.floor(visibleData.length / samples);
+    //const blockSize = Math.floor(channelData.length / samples);
     const volumes = [];
 
     for (let i=0; i<samples; i++) 
@@ -143,8 +153,8 @@ function drawMarkers(ctx, width, height)
     const min_spacing = 50; //minimum allowed distance between markers
 
     //line styling
-    ctx.fillStyle = '#888';
-    ctx.strokeStyle = '#555';
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1;
     ctx.font = '10px sans-serif';
 
@@ -171,12 +181,12 @@ function drawMarkers(ctx, width, height)
 async function handleFile(e) 
 {
     const file = e.target.files[0];
+    fileRef.value = file;
     if (!file) return;
 
-    //hide upload icon
-    showUpload.value = false;
-    //set fileAdded ref
+    showUpload.value = false; //hide upload icon
     fileAdded.value = true;
+    fileName.value = file.name;
 
     const fileURL = URL.createObjectURL(file);
     AudioRef.value.src = fileURL;
@@ -184,7 +194,7 @@ async function handleFile(e)
 
     //process, normalize and smooth value before drawing it to canvas
     const audioBuffer = await decodeFile(file);
-    const volumeData = getVolumeData(audioBuffer, 600);
+    const volumeData = getVolumeData(audioBuffer, 600, 0, audioBuffer.length);
     const normalized = normalize(volumeData);
     const smoothed = smooth(normalized);
 
@@ -220,7 +230,8 @@ function animate()
   const container = ContainerRef.value;
   if (!audio || !container || audio.paused) return;
 
-  playProgress.value = (audio.currentTime / audio.duration) * container.clientWidth;
+  //playProgress.value = (audio.currentTime / audio.duration) * container.clientWidth;
+  playProgress.value = (audio.currentTime / audioDuration.value) * container.clientWidth;
 
   animationId = requestAnimationFrame(animate);
 }
@@ -278,9 +289,8 @@ function seek(e) {
 
     //value is set between min and max based on trim sliders
     percent = Math.min(Math.max(percent, min), max);
-
-    audio.currentTime = percent * audio.duration;
-    playProgress.value = (audio.currentTime / audio.duration) * container.clientWidth;
+    audio.currentTime = percent * audioDuration.value;
+    playProgress.value = (audio.currentTime / audioDuration.value) * container.clientWidth;
 
     audioCurrent.value = audio.currentTime;
 }
@@ -290,6 +300,7 @@ function setDuration(e)
 {
     audioDuration.value = e.target.duration;
     trimEnd.value = audioDuration.value;
+    cutEnd.value = audioDuration.value;
 }
 
 //Format seconds to mm:ss.M
@@ -388,6 +399,33 @@ function monitorPlayback() {
   animationId3 = requestAnimationFrame(monitorPlayback);
 }
 
+//cut audio file for editing
+//doesn't actually cut the file, just sets cutStart and cutEnd that are treated visually as cut file
+async function cutFile()
+{
+    //set limits where to cut the file
+    const audioBuffer = await decodeFile(fileRef.value);
+    const sampleRate = audioBuffer.sampleRate;
+    const startSample = Math.floor(trimStart.value * sampleRate);
+    const endSample = Math.floor(trimEnd.value * sampleRate);
+
+    //set values
+    cutStart.value = trimStart.value;
+    cutEnd.value = trimEnd.value;
+    audioDuration.value = cutEnd.value - cutStart.value;
+    trimStart.value = 0;
+    trimEnd.value = audioDuration.value;
+    audioCurrent.value = trimStart.value;
+    playProgress.value = 0;
+    AudioRef.value.currentTime = trimStart.value;
+    
+    //draw graph
+    const volumeData = getVolumeData(audioBuffer, 600, startSample, endSample);
+    const normalized = normalize(volumeData);
+    const smoothed = smooth(normalized);
+    drawVolumeGraph(CanvasRef.value, smoothed);    
+}
+
 //trim handle positions
 const startPercent = computed(() =>
   (trimStart.value / audioDuration.value) * 100
@@ -403,7 +441,18 @@ const endPercent = computed(() =>
     <div class="channel">
         <div class="control-bar" v-if="fileAdded">
 
-            <div class="square-button" :class="{ active: loopEnabled }" @click="loopEnabled = !loopEnabled">
+            <div class="audio-info">
+                <div>{{fileName}}</div>
+                <div>{{formatTime(audioDuration)}}</div>
+            </div>
+
+            <div class="square-button" @click="cutFile">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20px" height="20px" viewBox="0 0 512 372">
+                    <path d="M54.5 1.6C33.9 6.2 18.1 17.5 11.6 32.3c-5.8 13.1-5.6 25.3.9 38.2 4.4 9 10 15.4 18.6 21.5 7.7 5.4 13.4 7.6 53 20.4 20.8 6.8 30 10.4 41.5 16.1 19.7 9.9 29.9 17.4 47.7 35.3l14.8 14.8-12.5 12.2c-19.4 18.8-34.3 29.1-55.9 38.2-6.2 2.6-25.9 9.5-43.8 15.4-33.6 11-37.6 12.8-47.6 21.4-22.5 19.2-23.4 51.8-1.9 70.8C33 342.4 45.2 348.4 56 351c16.8 4 39.8 2.2 56-4.4 25.3-10.3 40.7-32.8 36-52.7-3-12.9-9.1-22.3-18.8-29.1-2.4-1.6-4.1-3.5-4-4 .7-2 13.1-8.3 37.8-19.2 13.5-5.9 34.1-15.7 45.8-21.6l21.3-10.9 70.2 39.8c38.6 21.8 78 44.1 87.5 49.5 28.3 16 39.2 19.1 64.5 18.3 11-.3 18.3-1 22.7-2.2 8.6-2.3 23.2-8.5 22.8-9.7-.2-.5-48.4-29.2-107.1-63.6C332 206.7 284 178.3 284 178s46-27.6 102.3-60.7c56.2-33.2 105-61.9 108.5-64 3.4-2 6.2-4 6.2-4.3 0-.7-10.2-5.9-15.5-7.8-19-7-42.7-6.5-66.6 1.4-12.2 4.1-15.4 5.8-127 68.7L230.4 146l-24.5-12.3c-13.4-6.7-33.4-16.2-44.4-21.1-21.9-9.7-30-13.6-35.7-17.2l-3.7-2.4 7.9-7.8c15.7-15.5 19.7-33 11.5-49.8C134.2 20.5 117.6 8 98.4 2.9 87.7.1 64.5-.6 54.5 1.6M81.2 24c9.8 1.4 17 4.5 22.9 9.8 17.2 15.4 11.4 41.3-10.9 48.2-7 2.2-17 2.6-24.1.9-11.6-2.6-23.9-11.7-28.9-21.4-6.6-12.7-.7-27.6 13.5-34.2 8.8-4.1 16.1-4.9 27.5-3.3m17 247.5c6.3 2.2 13.6 8.8 16.4 15 2.7 5.7 3.2 14.2 1.2 20.8-1.5 5.1-9.2 13.5-15.6 17-10.6 5.8-29.1 7.3-40.1 3.3-10.6-3.9-19.1-13.8-19.9-23.1-1.1-13.7 12.8-28.9 31.1-34 6.5-1.9 20.3-1.3 26.9 1"/>
+                </svg>
+            </div>
+
+            <div class="square-button" :class="{ 'active-square-button': loopEnabled }" @click="loopEnabled = !loopEnabled">
                 <svg width="20px" height="20px" viewBox="-24 0 512 512" xmlns="http://www.w3.org/2000/svg" >
                     <path d="M232 448Q186 448 148 425 109 402 87 363 64 324 64 278L64 256 112 256 112 280Q112 331 147 366 182 400 233 400 265 400 293 384 320 367 336 340 352 313 352 281 352 230 318 195 283 160 232 160L232 232 136 136 232 40 232 112Q279 112 317 134 355 157 378 196 400 234 400 280 400 327 378 364 356 403 317 426 277 448 232 448Z" />
                 </svg>
@@ -604,12 +653,17 @@ canvas
     inset 0 -1px 1px rgba(255, 255, 255, 0.05);
 }
 
-.active
+.active-square-button
 {
     background-color: #d8d8d8;
     box-shadow:
     inset 0 1px 2px rgba(0, 0, 0, 0.6),
     inset 0 -1px 1px rgba(255, 255, 255, 0.05);
+}
+
+.audio-info
+{
+    font-size: 12px;
 }
 
 </style>
