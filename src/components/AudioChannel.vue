@@ -4,16 +4,25 @@ TODO:
 - rescale canvas on window resize
 - precision setting eg. (1.52s)
 - set trim/current timer manually
+- hover functionality on seek
+- fade in/out
+- better play button
+- change speed
+- save in different formats
 
 -->
 
 <script setup>
 import { ref, computed } from 'vue';
 
+const emit = defineEmits(['file-added']);
+
 const fileRef = ref(null);
 const AudioRef = ref(null);
 const CanvasRef = ref(null);
 const ContainerRef = ref(null);
+
+const gainNode = ref(null);
 
 const showUpload = ref(true); //shows upload button when audio file hasn't been added
 const audioPlaying = ref(false); //true when audio file is being played
@@ -24,6 +33,7 @@ const audioCtx = new AudioContext();
 const playProgress = ref(0); //progress of the audio file marker
 const audioDuration = ref(0); //duration of audio file in s
 const audioCurrent = ref(0); //current timer of audio in s
+const audioVolume = ref(1); //volume of audio
 
 const trimStart = ref(0); //starting point in s
 const trimEnd = ref(0); //ending point in s
@@ -153,8 +163,8 @@ function drawMarkers(ctx, width, height)
     const min_spacing = 50; //minimum allowed distance between markers
 
     //line styling
-    ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = '#ffffff';
+    ctx.fillStyle = '#0000ff';
+    ctx.strokeStyle = '#0000ff';
     ctx.lineWidth = 1;
     ctx.font = '10px sans-serif';
 
@@ -199,12 +209,16 @@ async function handleFile(e)
     const smoothed = smooth(normalized);
 
     drawVolumeGraph(CanvasRef.value, smoothed);
+    initAudioGraph();
+
+    //emit file to parent
+    emit('file-added', file);
 }
 
 //change volume
 function changeVolume(e)
 {
-    AudioRef.value.volume = e.target.value;
+    gainNode.value.gain.value = Number(e.target.value);
 }
 
 //plays/pauses audio
@@ -300,6 +314,7 @@ function setDuration(e)
 {
     audioDuration.value = e.target.duration;
     trimEnd.value = audioDuration.value;
+    dragEndTimer.value = audioDuration.value;
     cutEnd.value = audioDuration.value;
 }
 
@@ -336,7 +351,7 @@ function onDrag(e)
 
   if (dragHandle.value === 'start') 
   {
-    dragStartTimer.value = formatTime(newTime);
+    dragStartTimer.value = newTime;
     trimStart.value = Math.min(newTime, trimEnd.value - 0.1);
 
     //keep current audio marker inside trim limits
@@ -350,7 +365,7 @@ function onDrag(e)
 
   if (dragHandle.value === 'end') 
   {
-    dragEndTimer.value = formatTime(newTime);
+    dragEndTimer.value = newTime;
     trimEnd.value = Math.max(newTime, trimStart.value + 0.1);
 
     if(trimEnd.value < audioCurrent.value)
@@ -426,6 +441,16 @@ async function cutFile()
     drawVolumeGraph(CanvasRef.value, smoothed);    
 }
 
+//initialize audio context for volume editing
+function initAudioGraph() {
+  const ctx = new AudioContext();
+  const source = ctx.createMediaElementSource(AudioRef.value);
+  gainNode.value = ctx.createGain();
+
+  source.connect(gainNode.value);
+  gainNode.value.connect(ctx.destination);
+}
+
 //trim handle positions
 const startPercent = computed(() =>
   (trimStart.value / audioDuration.value) * 100
@@ -434,6 +459,11 @@ const startPercent = computed(() =>
 const endPercent = computed(() =>
   (trimEnd.value / audioDuration.value) * 100
 );
+
+//visual volume number
+const volumeDisplay = computed(() => {
+  return Math.round(audioVolume.value * 100) + "%";
+});
 
 </script>
 
@@ -446,31 +476,35 @@ const endPercent = computed(() =>
                 <div>{{formatTime(audioDuration)}}</div>
             </div>
 
-            <div class="square-button" @click="cutFile">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20px" height="20px" viewBox="0 0 512 372">
-                    <path d="M54.5 1.6C33.9 6.2 18.1 17.5 11.6 32.3c-5.8 13.1-5.6 25.3.9 38.2 4.4 9 10 15.4 18.6 21.5 7.7 5.4 13.4 7.6 53 20.4 20.8 6.8 30 10.4 41.5 16.1 19.7 9.9 29.9 17.4 47.7 35.3l14.8 14.8-12.5 12.2c-19.4 18.8-34.3 29.1-55.9 38.2-6.2 2.6-25.9 9.5-43.8 15.4-33.6 11-37.6 12.8-47.6 21.4-22.5 19.2-23.4 51.8-1.9 70.8C33 342.4 45.2 348.4 56 351c16.8 4 39.8 2.2 56-4.4 25.3-10.3 40.7-32.8 36-52.7-3-12.9-9.1-22.3-18.8-29.1-2.4-1.6-4.1-3.5-4-4 .7-2 13.1-8.3 37.8-19.2 13.5-5.9 34.1-15.7 45.8-21.6l21.3-10.9 70.2 39.8c38.6 21.8 78 44.1 87.5 49.5 28.3 16 39.2 19.1 64.5 18.3 11-.3 18.3-1 22.7-2.2 8.6-2.3 23.2-8.5 22.8-9.7-.2-.5-48.4-29.2-107.1-63.6C332 206.7 284 178.3 284 178s46-27.6 102.3-60.7c56.2-33.2 105-61.9 108.5-64 3.4-2 6.2-4 6.2-4.3 0-.7-10.2-5.9-15.5-7.8-19-7-42.7-6.5-66.6 1.4-12.2 4.1-15.4 5.8-127 68.7L230.4 146l-24.5-12.3c-13.4-6.7-33.4-16.2-44.4-21.1-21.9-9.7-30-13.6-35.7-17.2l-3.7-2.4 7.9-7.8c15.7-15.5 19.7-33 11.5-49.8C134.2 20.5 117.6 8 98.4 2.9 87.7.1 64.5-.6 54.5 1.6M81.2 24c9.8 1.4 17 4.5 22.9 9.8 17.2 15.4 11.4 41.3-10.9 48.2-7 2.2-17 2.6-24.1.9-11.6-2.6-23.9-11.7-28.9-21.4-6.6-12.7-.7-27.6 13.5-34.2 8.8-4.1 16.1-4.9 27.5-3.3m17 247.5c6.3 2.2 13.6 8.8 16.4 15 2.7 5.7 3.2 14.2 1.2 20.8-1.5 5.1-9.2 13.5-15.6 17-10.6 5.8-29.1 7.3-40.1 3.3-10.6-3.9-19.1-13.8-19.9-23.1-1.1-13.7 12.8-28.9 31.1-34 6.5-1.9 20.3-1.3 26.9 1"/>
-                </svg>
-            </div>
+            <div class="button-wrap">
+                <div class="square-button" @click="cutFile">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20px" height="20px" viewBox="0 0 512 372">
+                        <path d="M54.5 1.6C33.9 6.2 18.1 17.5 11.6 32.3c-5.8 13.1-5.6 25.3.9 38.2 4.4 9 10 15.4 18.6 21.5 7.7 5.4 13.4 7.6 53 20.4 20.8 6.8 30 10.4 41.5 16.1 19.7 9.9 29.9 17.4 47.7 35.3l14.8 14.8-12.5 12.2c-19.4 18.8-34.3 29.1-55.9 38.2-6.2 2.6-25.9 9.5-43.8 15.4-33.6 11-37.6 12.8-47.6 21.4-22.5 19.2-23.4 51.8-1.9 70.8C33 342.4 45.2 348.4 56 351c16.8 4 39.8 2.2 56-4.4 25.3-10.3 40.7-32.8 36-52.7-3-12.9-9.1-22.3-18.8-29.1-2.4-1.6-4.1-3.5-4-4 .7-2 13.1-8.3 37.8-19.2 13.5-5.9 34.1-15.7 45.8-21.6l21.3-10.9 70.2 39.8c38.6 21.8 78 44.1 87.5 49.5 28.3 16 39.2 19.1 64.5 18.3 11-.3 18.3-1 22.7-2.2 8.6-2.3 23.2-8.5 22.8-9.7-.2-.5-48.4-29.2-107.1-63.6C332 206.7 284 178.3 284 178s46-27.6 102.3-60.7c56.2-33.2 105-61.9 108.5-64 3.4-2 6.2-4 6.2-4.3 0-.7-10.2-5.9-15.5-7.8-19-7-42.7-6.5-66.6 1.4-12.2 4.1-15.4 5.8-127 68.7L230.4 146l-24.5-12.3c-13.4-6.7-33.4-16.2-44.4-21.1-21.9-9.7-30-13.6-35.7-17.2l-3.7-2.4 7.9-7.8c15.7-15.5 19.7-33 11.5-49.8C134.2 20.5 117.6 8 98.4 2.9 87.7.1 64.5-.6 54.5 1.6M81.2 24c9.8 1.4 17 4.5 22.9 9.8 17.2 15.4 11.4 41.3-10.9 48.2-7 2.2-17 2.6-24.1.9-11.6-2.6-23.9-11.7-28.9-21.4-6.6-12.7-.7-27.6 13.5-34.2 8.8-4.1 16.1-4.9 27.5-3.3m17 247.5c6.3 2.2 13.6 8.8 16.4 15 2.7 5.7 3.2 14.2 1.2 20.8-1.5 5.1-9.2 13.5-15.6 17-10.6 5.8-29.1 7.3-40.1 3.3-10.6-3.9-19.1-13.8-19.9-23.1-1.1-13.7 12.8-28.9 31.1-34 6.5-1.9 20.3-1.3 26.9 1"/>
+                    </svg>
+                </div>
 
-            <div class="square-button" :class="{ 'active-square-button': loopEnabled }" @click="loopEnabled = !loopEnabled">
-                <svg width="20px" height="20px" viewBox="-24 0 512 512" xmlns="http://www.w3.org/2000/svg" >
-                    <path d="M232 448Q186 448 148 425 109 402 87 363 64 324 64 278L64 256 112 256 112 280Q112 331 147 366 182 400 233 400 265 400 293 384 320 367 336 340 352 313 352 281 352 230 318 195 283 160 232 160L232 232 136 136 232 40 232 112Q279 112 317 134 355 157 378 196 400 234 400 280 400 327 378 364 356 403 317 426 277 448 232 448Z" />
-                </svg>
+                <div class="square-button" :class="{ 'active-square-button': loopEnabled }" @click="loopEnabled = !loopEnabled">
+                    <svg width="20px" height="20px" viewBox="-24 0 512 512" xmlns="http://www.w3.org/2000/svg" >
+                        <path d="M232 448Q186 448 148 425 109 402 87 363 64 324 64 278L64 256 112 256 112 280Q112 331 147 366 182 400 233 400 265 400 293 384 320 367 336 340 352 313 352 281 352 230 318 195 283 160 232 160L232 232 136 136 232 40 232 112Q279 112 317 134 355 157 378 196 400 234 400 280 400 327 378 364 356 403 317 426 277 448 232 448Z" />
+                    </svg>
+                </div>
             </div>
 
             <div class="play-audio-wrapper" @click="togglePlay">
-                <svg v-if="!audioPlaying" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="20" height="20">
+                <svg v-if="!audioPlaying" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="30" height="30">
                     <path d="M5.716 49.715a2.272 2.272 0 0 0 2.306 -0.061l36.364 -22.727a2.273 2.273 0 0 0 0 -3.855L8.023 0.345A2.273 2.273 0 0 0 4.545 2.273v45.455a2.273 2.273 0 0 0 1.171 1.988"/>
                 </svg>
-                <svg v-else width="20px" height="20px" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                <svg v-else width="30px" height="30px" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
                     <path d="M4.694 1.758A0.787 0.787 0 0 0 3.906 2.545v14.909A0.787 0.787 0 0 0 4.694 18.242h2.566A0.787 0.787 0 0 0 8.047 17.455V2.545A0.787 0.787 0 0 0 7.259 1.758zm8.047 0A0.787 0.787 0 0 0 11.953 2.545v14.909A0.787 0.787 0 0 0 12.741 18.242h2.566A0.787 0.787 0 0 0 16.094 17.455V2.545A0.787 0.787 0 0 0 15.306 1.758z"/>
                 </svg>
             </div>
 
-            <span>{{formatTime(audioCurrent) +" / "}}</span>
-            <span>{{formatTime(audioDuration)}}</span>
+            <span>{{formatTime(audioCurrent)+" / "+formatTime(audioDuration)}}</span>
 
-            <div><input type="range" class="volume-control" name="volume" min="0" max="1" step="0.01" @input="changeVolume"/></div>
+            <div class="volume-wrap">
+                <input type="range" class="volume-control" name="volume" min="0" max="2" step="0.01" v-model="audioVolume" @input="changeVolume"/>
+                <span>{{ volumeDisplay }}</span>
+            </div>
         </div>
         <div ref="ContainerRef" class="audio-visual" @click="seek">
             <label v-show="showUpload" class="add-audio-label"><div class="circle">+</div>
@@ -479,15 +513,15 @@ const endPercent = computed(() =>
             <audio ref="AudioRef" accept="audio/*" hidden @play="startPlay" @pause="pausePlay" @ended="endPlay" @loadedmetadata="setDuration"></audio>
 
             <div class="trim-overlay left" :style="{ width: startPercent + '%' }" v-if="fileAdded"></div>
-            <div class="trim-handle start" :style="{ left: startPercent + '%' }"@mousedown.stop="startDrag('start')" v-if="fileAdded">
-                <div class="trim-timer">{{dragStartTimer}}</div>
+            <div class="trim-handle start" :style="{ left: startPercent + '%' }" draggable="false" @mousedown.stop="startDrag('start')" v-if="fileAdded">
+                <div class="trim-timer">{{formatTime(dragStartTimer)}}</div>
             </div>
 
             <canvas ref="CanvasRef" class="canvas"></canvas>
 
             <div class="progress-bar" v-if="fileAdded" :style="{ left: playProgress + 'px' }"></div>
             <div class="trim-handle end" :style="{ left: endPercent + '%' }" draggable="false" @mousedown.stop="startDrag('end')" v-if="fileAdded">
-                <div class="trim-timer">{{dragEndTimer}}</div>
+                <div class="trim-timer">{{formatTime(dragEndTimer)}}</div>
             </div>
             <div class="trim-overlay right" :style="{ width: (100 - endPercent) + '%' }" v-if="fileAdded"></div>
         </div>
@@ -508,7 +542,8 @@ const endPercent = computed(() =>
     display: flex;
     justify-content: center;
     align-items: center;
-    padding: 20px 0px 30px 0px;    
+    padding: 20px 0px 30px 0px;
+    border-bottom: 2px solid #e9e9e9;
 }
 
 .audio-visual
@@ -517,7 +552,7 @@ const endPercent = computed(() =>
     display: flex;
     justify-content: center;
     height: 86px;
-    background-color: #cbcbcb;
+    margin: 0px 30px;
 }
 
 .add-audio-label
@@ -551,8 +586,7 @@ const endPercent = computed(() =>
 .play-audio-wrapper
 {
     padding: 5px 10px;
-    height: 20px;
-    width: 20px;
+    cursor: pointer;
 }
 
 canvas
@@ -636,6 +670,12 @@ canvas
     right: 0;
 }
 
+.button-wrap
+{
+    display: flex;
+    margin: 0px 50px;
+}
+
 .square-button
 {
     height: 20px;
@@ -664,6 +704,14 @@ canvas
 .audio-info
 {
     font-size: 12px;
+    position: absolute;
+    left: 25px;
+}
+
+.volume-wrap
+{
+    position: absolute;
+    right: 25px;
 }
 
 </style>
