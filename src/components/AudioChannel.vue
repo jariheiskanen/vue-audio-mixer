@@ -1,11 +1,9 @@
 <!--
 TODO:
 - graph timer marker scaling dynamically
-- rescale canvas on window resize
 - precision setting eg. (1.52s)
-- set trim/current timer manually
-- hover functionality on seek
-- fade in/out
+- set timers by typing
+- fade audio in/out
 - better play button
 - change speed
 - save in different formats
@@ -13,7 +11,7 @@ TODO:
 -->
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 
 const emit = defineEmits(['file-added']);
 
@@ -21,29 +19,33 @@ const fileRef = ref(null);
 const AudioRef = ref(null);
 const CanvasRef = ref(null);
 const ContainerRef = ref(null);
-
+const audioCtx = new AudioContext();
 const gainNode = ref(null);
+const AudioBuffer = ref(null);
 
 const showUpload = ref(true); //shows upload button when audio file hasn't been added
 const audioPlaying = ref(false); //true when audio file is being played
 const fileAdded = ref(false); //file added
 const fileName = ref(null); //name of the selected file
-const audioCtx = new AudioContext();
 
-const playProgress = ref(0); //progress of the audio file marker
+const playProgress = ref(0); //progress of the audio file marker in %
 const audioDuration = ref(0); //duration of audio file in s
 const audioCurrent = ref(0); //current timer of audio in s
 const audioVolume = ref(1); //volume of audio
+const loopEnabled = ref(false); //enabled looping setting
 
+//trim
 const trimStart = ref(0); //starting point in s
 const trimEnd = ref(0); //ending point in s
 const dragHandle = ref(null); //which handle is being dragged
+const disabledClick = ref(false); //click disabled for seeking during drag
 
-const disabledClick = ref(false); //if seeking click is disabled
-const dragStartTimer = ref(0); //timer for dragged trim start
-const dragEndTimer = ref(0); //timer for dragged trim end
-const loopEnabled = ref(false); //enabled looping setting
+//mouse hover
+const hoverSeekX = ref(0);
+const hoverVisible = ref(false);
+const hoverSeekTime = ref(0);
 
+//cut timers
 const cutStart = ref(0); //start of cut file in s
 const cutEnd = ref(0); //end of cut file in s
 
@@ -207,6 +209,7 @@ async function handleFile(e)
     const volumeData = getVolumeData(audioBuffer, 600, 0, audioBuffer.length);
     const normalized = normalize(volumeData);
     const smoothed = smooth(normalized);
+    AudioBuffer.value = audioBuffer;
 
     drawVolumeGraph(CanvasRef.value, smoothed);
     initAudioGraph();
@@ -309,12 +312,30 @@ function seek(e) {
     audioCurrent.value = audio.currentTime;
 }
 
+//seek hover effect
+function hoverSeek(e)
+{
+    const rect = CanvasRef.value.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+
+    hoverSeekX.value = x;
+    hoverVisible.value = true;
+
+    const percent = x / rect.width;
+    hoverSeekTime.value = percent * audioDuration.value;
+}
+
+//mouse exit hover zone
+function hoverLeave()
+{
+  hoverVisible.value = false;
+}
+
 //sets total length of audio
 function setDuration(e)
 {
     audioDuration.value = e.target.duration;
     trimEnd.value = audioDuration.value;
-    dragEndTimer.value = audioDuration.value;
     cutEnd.value = audioDuration.value;
 }
 
@@ -351,7 +372,6 @@ function onDrag(e)
 
   if (dragHandle.value === 'start') 
   {
-    dragStartTimer.value = newTime;
     trimStart.value = Math.min(newTime, trimEnd.value - 0.1);
 
     //keep current audio marker inside trim limits
@@ -365,7 +385,6 @@ function onDrag(e)
 
   if (dragHandle.value === 'end') 
   {
-    dragEndTimer.value = newTime;
     trimEnd.value = Math.max(newTime, trimStart.value + 0.1);
 
     if(trimEnd.value < audioCurrent.value)
@@ -418,12 +437,6 @@ function monitorPlayback() {
 //doesn't actually cut the file, just sets cutStart and cutEnd that are treated visually as cut file
 async function cutFile()
 {
-    //set limits where to cut the file
-    const audioBuffer = await decodeFile(fileRef.value);
-    const sampleRate = audioBuffer.sampleRate;
-    const startSample = Math.floor(trimStart.value * sampleRate);
-    const endSample = Math.floor(trimEnd.value * sampleRate);
-
     //set values
     cutStart.value = trimStart.value;
     cutEnd.value = trimEnd.value;
@@ -433,12 +446,8 @@ async function cutFile()
     audioCurrent.value = trimStart.value;
     playProgress.value = 0;
     AudioRef.value.currentTime = trimStart.value;
-    
-    //draw graph
-    const volumeData = getVolumeData(audioBuffer, 600, startSample, endSample);
-    const normalized = normalize(volumeData);
-    const smoothed = smooth(normalized);
-    drawVolumeGraph(CanvasRef.value, smoothed);    
+
+    redrawCanvas();
 }
 
 //initialize audio context for volume editing
@@ -449,6 +458,20 @@ function initAudioGraph() {
 
   source.connect(gainNode.value);
   gainNode.value.connect(ctx.destination);
+}
+
+//redraws canvas
+function redrawCanvas()
+{
+    if (!AudioBuffer.value) return;
+    const sampleRate = AudioBuffer.value.sampleRate;
+    const startSample = Math.floor(trimStart.value * sampleRate);
+    const endSample = Math.floor(trimEnd.value * sampleRate);
+
+    const volumeData = getVolumeData(AudioBuffer.value, 600, startSample, endSample);
+    const normalized = normalize(volumeData);
+    const smoothed = smooth(normalized);
+    drawVolumeGraph(CanvasRef.value, smoothed); 
 }
 
 //trim handle positions
@@ -463,6 +486,20 @@ const endPercent = computed(() =>
 //visual volume number
 const volumeDisplay = computed(() => {
   return Math.round(audioVolume.value * 100) + "%";
+});
+
+//window resize
+let resizeObserver;
+onMounted(() => {
+  resizeObserver = new ResizeObserver(() => {
+    redrawCanvas();
+  });
+
+  resizeObserver.observe(CanvasRef.value);
+});
+
+onBeforeUnmount(() => {
+  resizeObserver.disconnect();
 });
 
 </script>
@@ -482,7 +519,6 @@ const volumeDisplay = computed(() => {
                         <path d="M54.5 1.6C33.9 6.2 18.1 17.5 11.6 32.3c-5.8 13.1-5.6 25.3.9 38.2 4.4 9 10 15.4 18.6 21.5 7.7 5.4 13.4 7.6 53 20.4 20.8 6.8 30 10.4 41.5 16.1 19.7 9.9 29.9 17.4 47.7 35.3l14.8 14.8-12.5 12.2c-19.4 18.8-34.3 29.1-55.9 38.2-6.2 2.6-25.9 9.5-43.8 15.4-33.6 11-37.6 12.8-47.6 21.4-22.5 19.2-23.4 51.8-1.9 70.8C33 342.4 45.2 348.4 56 351c16.8 4 39.8 2.2 56-4.4 25.3-10.3 40.7-32.8 36-52.7-3-12.9-9.1-22.3-18.8-29.1-2.4-1.6-4.1-3.5-4-4 .7-2 13.1-8.3 37.8-19.2 13.5-5.9 34.1-15.7 45.8-21.6l21.3-10.9 70.2 39.8c38.6 21.8 78 44.1 87.5 49.5 28.3 16 39.2 19.1 64.5 18.3 11-.3 18.3-1 22.7-2.2 8.6-2.3 23.2-8.5 22.8-9.7-.2-.5-48.4-29.2-107.1-63.6C332 206.7 284 178.3 284 178s46-27.6 102.3-60.7c56.2-33.2 105-61.9 108.5-64 3.4-2 6.2-4 6.2-4.3 0-.7-10.2-5.9-15.5-7.8-19-7-42.7-6.5-66.6 1.4-12.2 4.1-15.4 5.8-127 68.7L230.4 146l-24.5-12.3c-13.4-6.7-33.4-16.2-44.4-21.1-21.9-9.7-30-13.6-35.7-17.2l-3.7-2.4 7.9-7.8c15.7-15.5 19.7-33 11.5-49.8C134.2 20.5 117.6 8 98.4 2.9 87.7.1 64.5-.6 54.5 1.6M81.2 24c9.8 1.4 17 4.5 22.9 9.8 17.2 15.4 11.4 41.3-10.9 48.2-7 2.2-17 2.6-24.1.9-11.6-2.6-23.9-11.7-28.9-21.4-6.6-12.7-.7-27.6 13.5-34.2 8.8-4.1 16.1-4.9 27.5-3.3m17 247.5c6.3 2.2 13.6 8.8 16.4 15 2.7 5.7 3.2 14.2 1.2 20.8-1.5 5.1-9.2 13.5-15.6 17-10.6 5.8-29.1 7.3-40.1 3.3-10.6-3.9-19.1-13.8-19.9-23.1-1.1-13.7 12.8-28.9 31.1-34 6.5-1.9 20.3-1.3 26.9 1"/>
                     </svg>
                 </div>
-
                 <div class="square-button" :class="{ 'active-square-button': loopEnabled }" @click="loopEnabled = !loopEnabled">
                     <svg width="20px" height="20px" viewBox="-24 0 512 512" xmlns="http://www.w3.org/2000/svg" >
                         <path d="M232 448Q186 448 148 425 109 402 87 363 64 324 64 278L64 256 112 256 112 280Q112 331 147 366 182 400 233 400 265 400 293 384 320 367 336 340 352 313 352 281 352 230 318 195 283 160 232 160L232 232 136 136 232 40 232 112Q279 112 317 134 355 157 378 196 400 234 400 280 400 327 378 364 356 403 317 426 277 448 232 448Z" />
@@ -499,14 +535,14 @@ const volumeDisplay = computed(() => {
                 </svg>
             </div>
 
-            <span>{{formatTime(audioCurrent)+" / "+formatTime(audioDuration)}}</span>
+            <span>{{formatTime(audioCurrent)}}</span>
 
             <div class="volume-wrap">
                 <input type="range" class="volume-control" name="volume" min="0" max="2" step="0.01" v-model="audioVolume" @input="changeVolume"/>
                 <span>{{ volumeDisplay }}</span>
             </div>
         </div>
-        <div ref="ContainerRef" class="audio-visual" @click="seek">
+        <div ref="ContainerRef" class="audio-visual" @click="seek" @mousemove="hoverSeek" @mouseleave="hoverLeave">
             <label v-show="showUpload" class="add-audio-label"><div class="circle">+</div>
                 <input type="file" accept="audio/*" @change="handleFile" hidden />
             </label>
@@ -514,14 +550,18 @@ const volumeDisplay = computed(() => {
 
             <div class="trim-overlay left" :style="{ width: startPercent + '%' }" v-if="fileAdded"></div>
             <div class="trim-handle start" :style="{ left: startPercent + '%' }" draggable="false" @mousedown.stop="startDrag('start')" v-if="fileAdded">
-                <div class="trim-timer">{{formatTime(dragStartTimer)}}</div>
+                <div class="trim-timer">{{formatTime(trimStart)}}</div>
             </div>
 
             <canvas ref="CanvasRef" class="canvas"></canvas>
 
+            <div v-show="fileAdded && hoverVisible && !dragHandle" class="progress-bar hover-bar" :style="{ left: hoverSeekX + 'px' }">
+                <div class="trim-timer">{{formatTime(hoverSeekTime)}}</div>
+            </div>
             <div class="progress-bar" v-if="fileAdded" :style="{ left: playProgress + 'px' }"></div>
+
             <div class="trim-handle end" :style="{ left: endPercent + '%' }" draggable="false" @mousedown.stop="startDrag('end')" v-if="fileAdded">
-                <div class="trim-timer">{{formatTime(dragEndTimer)}}</div>
+                <div class="trim-timer">{{formatTime(trimEnd)}}</div>
             </div>
             <div class="trim-overlay right" :style="{ width: (100 - endPercent) + '%' }" v-if="fileAdded"></div>
         </div>
@@ -610,6 +650,11 @@ canvas
   pointer-events: none;
 }
 
+.hover-bar 
+{
+  background: rgba(255, 0, 0, 0.35);
+}
+
 .trim-handle 
 {
   position: absolute;
@@ -636,6 +681,7 @@ canvas
     white-space: nowrap;
     box-shadow: 0 2px 6px rgba(0,0,0,0.3);
     user-select: none;
+    background: white;
 }
 
 .trim-timer::after 
