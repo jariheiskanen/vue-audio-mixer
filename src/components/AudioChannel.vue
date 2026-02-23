@@ -7,11 +7,23 @@ TODO:
 - better play button
 - change speed
 - save in different formats, wav done
+- move from lamejs to ffmpeg.wasm?
 
 -->
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import lamejs from 'lamejs';
+
+/*globals need to be defined manually because its an old library*/
+import MPEGMode from 'lamejs/src/js/MPEGMode';
+import Lame from 'lamejs/src/js/Lame';
+import BitStream from 'lamejs/src/js/BitStream';
+window.MPEGMode = MPEGMode;
+window.Lame = Lame;
+window.BitStream = BitStream;
+
+
 
 const emit = defineEmits(['file-added']);
 
@@ -489,16 +501,29 @@ function redrawCanvas(start, end)
 }
 
 //downloads file based on current cut limits
-function downloadFile()
+function downloadFile(type)
 {
     const trimmed = trimAudioBuffer();
-    const wavBlob = convertWav(trimmed);
+    let blob = null;
+    let download_name = null;
+    switch(type)
+    {
+        case "wav":
+            blob = convertWav(trimmed);
+            download_name = fileName.value.replace(/\.[^/.]+$/, '') + '-edit.wav';
+            break;
+        case "mp3":
+            blob = convertMp3(trimmed);
+            download_name = fileName.value.replace(/\.[^/.]+$/, '') + '.mp3';
+            break;
+        default:
+    }
 
     //download file
-    const url = URL.createObjectURL(wavBlob);
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'trimmed-audio.wav';
+    a.download = download_name;
     a.click();
     URL.revokeObjectURL(url);
 }
@@ -577,6 +602,38 @@ function convertWav(buffer)
   return new Blob([view], { type: 'audio/wav' });
 }
 
+//converts audio buffer into mp3 blob
+function convertMp3(buffer, bitrate = 128) 
+{
+  const numChannels = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const samples = buffer.getChannelData(0); // mono (simplest)
+
+  // convert Float32 → Int16
+  const pcm = new Int16Array(samples.length);
+  for (let i = 0; i < samples.length; i++) 
+  {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    pcm[i] = s * 0x7fff;
+  }
+
+  const mp3encoder = new lamejs.Mp3Encoder(1, sampleRate, bitrate);
+  const blockSize = 1152;
+  const mp3Data = [];
+
+  for (let i = 0; i < pcm.length; i += blockSize) 
+  {
+    const chunk = pcm.subarray(i, i + blockSize);
+    const mp3buf = mp3encoder.encodeBuffer(chunk);
+    if (mp3buf.length) mp3Data.push(mp3buf);
+  }
+
+  const end = mp3encoder.flush();
+  if (end.length) mp3Data.push(end);
+
+  return new Blob(mp3Data, { type: 'audio/mp3' });
+}
+
 //trim handle positions
 const startPercent = computed(() =>
   (trimStart.value / audioDuration.value) * 100
@@ -617,7 +674,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="button-wrap">
-                <div class="square-button" @click="downloadFile">
+                <div class="square-button" @click="downloadFile('mp3')" title="Download (.mp3)">
                     <!-- License: PD. Made by icons8: https://github.com/icons8/windows-10-icons -->
                     <svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 32 32" enable-background="new 0 0 32 32" xml:space="preserve">
                         <line fill="none" stroke="#000000" stroke-width="3" stroke-miterlimit="10" x1="25" y1="28" x2="7" y2="28"/>
@@ -625,12 +682,20 @@ onBeforeUnmount(() => {
                         <polyline fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10" points="9,16 16,23 23,16 "/>
                     </svg>
                 </div>
-                <div class="square-button" @click="cutFile">
+                <div class="square-button" @click="downloadFile('wav')" title="Download (.wav)">
+                    <!-- License: PD. Made by icons8: https://github.com/icons8/windows-10-icons -->
+                    <svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 32 32" enable-background="new 0 0 32 32" xml:space="preserve">
+                        <line fill="none" stroke="#000000" stroke-width="3" stroke-miterlimit="10" x1="25" y1="28" x2="7" y2="28"/>
+                        <line fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10" x1="16" y1="23" x2="16" y2="4"/>
+                        <polyline fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10" points="9,16 16,23 23,16 "/>
+                    </svg>
+                </div>
+                <div class="square-button" @click="cutFile" title="Cut">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20px" height="20px" viewBox="0 0 512 372">
                         <path d="M54.5 1.6C33.9 6.2 18.1 17.5 11.6 32.3c-5.8 13.1-5.6 25.3.9 38.2 4.4 9 10 15.4 18.6 21.5 7.7 5.4 13.4 7.6 53 20.4 20.8 6.8 30 10.4 41.5 16.1 19.7 9.9 29.9 17.4 47.7 35.3l14.8 14.8-12.5 12.2c-19.4 18.8-34.3 29.1-55.9 38.2-6.2 2.6-25.9 9.5-43.8 15.4-33.6 11-37.6 12.8-47.6 21.4-22.5 19.2-23.4 51.8-1.9 70.8C33 342.4 45.2 348.4 56 351c16.8 4 39.8 2.2 56-4.4 25.3-10.3 40.7-32.8 36-52.7-3-12.9-9.1-22.3-18.8-29.1-2.4-1.6-4.1-3.5-4-4 .7-2 13.1-8.3 37.8-19.2 13.5-5.9 34.1-15.7 45.8-21.6l21.3-10.9 70.2 39.8c38.6 21.8 78 44.1 87.5 49.5 28.3 16 39.2 19.1 64.5 18.3 11-.3 18.3-1 22.7-2.2 8.6-2.3 23.2-8.5 22.8-9.7-.2-.5-48.4-29.2-107.1-63.6C332 206.7 284 178.3 284 178s46-27.6 102.3-60.7c56.2-33.2 105-61.9 108.5-64 3.4-2 6.2-4 6.2-4.3 0-.7-10.2-5.9-15.5-7.8-19-7-42.7-6.5-66.6 1.4-12.2 4.1-15.4 5.8-127 68.7L230.4 146l-24.5-12.3c-13.4-6.7-33.4-16.2-44.4-21.1-21.9-9.7-30-13.6-35.7-17.2l-3.7-2.4 7.9-7.8c15.7-15.5 19.7-33 11.5-49.8C134.2 20.5 117.6 8 98.4 2.9 87.7.1 64.5-.6 54.5 1.6M81.2 24c9.8 1.4 17 4.5 22.9 9.8 17.2 15.4 11.4 41.3-10.9 48.2-7 2.2-17 2.6-24.1.9-11.6-2.6-23.9-11.7-28.9-21.4-6.6-12.7-.7-27.6 13.5-34.2 8.8-4.1 16.1-4.9 27.5-3.3m17 247.5c6.3 2.2 13.6 8.8 16.4 15 2.7 5.7 3.2 14.2 1.2 20.8-1.5 5.1-9.2 13.5-15.6 17-10.6 5.8-29.1 7.3-40.1 3.3-10.6-3.9-19.1-13.8-19.9-23.1-1.1-13.7 12.8-28.9 31.1-34 6.5-1.9 20.3-1.3 26.9 1"/>
                     </svg>
                 </div>
-                <div class="square-button" :class="{ 'active-square-button': loopEnabled }" @click="loopEnabled = !loopEnabled">
+                <div class="square-button" :class="{ 'active-square-button': loopEnabled }" @click="loopEnabled = !loopEnabled"  title="Loop">
                     <svg width="20px" height="20px" viewBox="-24 0 512 512" xmlns="http://www.w3.org/2000/svg" >
                         <path d="M232 448Q186 448 148 425 109 402 87 363 64 324 64 278L64 256 112 256 112 280Q112 331 147 366 182 400 233 400 265 400 293 384 320 367 336 340 352 313 352 281 352 230 318 195 283 160 232 160L232 232 136 136 232 40 232 112Q279 112 317 134 355 157 378 196 400 234 400 280 400 327 378 364 356 403 317 426 277 448 232 448Z" />
                     </svg>

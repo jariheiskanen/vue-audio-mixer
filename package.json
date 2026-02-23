@@ -10,6 +10,7 @@
     "deploy": "vite build && gh-pages -d dist"
   },
   "dependencies": {
+    "lamejs": "^1.2.1",
     "vue": "^3.5.27"
   },
   "devDependencies": {
