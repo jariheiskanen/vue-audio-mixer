@@ -37,6 +37,11 @@ const channelCount = computed(() => {
 
 <style scoped>
 
+.layout-wrapper
+{
+  font-family: system-ui, sans-serif;
+}
+
 .main-section
 {
   min-height: 545px;
