@@ -4,15 +4,15 @@ TODO:
 - precision setting eg. (1.52s)
 - set timers by typing
 - fade audio in/out
-- better play button
 - change speed
-- save in different formats, wav done
+- save in different formats, wav, mp3 done
 - move from lamejs to ffmpeg.wasm?
 
 -->
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import VolumeControl from './VolumeControl.vue'
 import lamejs from 'lamejs';
 
 /*globals need to be defined manually because its an old library*/
@@ -40,7 +40,6 @@ const audioPlaying = ref(false); //true when audio file is being played
 const fileAdded = ref(false); //file added
 const fileName = ref(null); //name of the selected file
 
-const playProgress = ref(0); //progress of the audio file marker in %
 const audioDuration = ref(0); //duration of audio file in s
 const audioCurrent = ref(0); //current timer of audio in s
 const audioVolume = ref(1); //volume of audio
@@ -239,7 +238,7 @@ async function handleFile(e)
 //change volume
 function changeVolume(e)
 {
-    gainNode.value.gain.value = Number(e.target.value);
+    gainNode.value.gain.value = Number(e);
 }
 
 //plays/pauses audio
@@ -264,8 +263,6 @@ function animate()
   const audio = AudioRef.value;
   const container = ContainerRef.value;
   if (!audio || !container || audio.paused) return;
-
-  playProgress.value = ((audio.currentTime - cutStart.value) / audioDuration.value) * container.clientWidth;
 
   animationId = requestAnimationFrame(animate);
 }
@@ -315,7 +312,6 @@ function seek(e) {
     percent = Math.min(Math.max(percent, min), max);
 
     audio.currentTime = cutStart.value + percent * audioDuration.value;
-    playProgress.value = ((audio.currentTime - cutStart.value) / audioDuration.value) * container.clientWidth;
     audioCurrent.value = audio.currentTime - cutStart.value;
 }
 
@@ -395,7 +391,6 @@ function onDrag(e)
     {
         AudioRef.value.currentTime = trimStart.value;
         audioCurrent.value = trimStart.value;
-        playProgress.value = (audioCurrent.value / audioDuration.value) * container.clientWidth;
     }
   }
 
@@ -406,7 +401,6 @@ function onDrag(e)
     if(trimEnd.value < audioCurrent.value)
     {
         audioCurrent.value = trimEnd.value;
-        playProgress.value = playProgress.value = (audioCurrent.value / audioDuration.value) * container.clientWidth;
     }
   }
 }
@@ -440,7 +434,6 @@ function monitorPlayback() {
     {
         audio.pause();
         audio.currentTime = trimStart.value+cutStart.value;
-        playProgress.value = ((audio.currentTime - cutStart.value) / audioDuration.value) * ContainerRef.value.clientWidth;
         audioCurrent.value = 0;
         audioPlaying.value = false;
         cancelAnimationFrame(animationId3);
@@ -464,7 +457,6 @@ async function cutFile()
     redrawCanvas(trimStart.value, trimEnd.value);
 
     AudioRef.value.currentTime = cutStart.value;
-    playProgress.value = 0;
     audioCurrent.value = 0;
     trimStart.value = 0;
     trimEnd.value = audioDuration.value;    
@@ -628,6 +620,42 @@ function convertMp3(buffer, bitrate = 128)
   return new Blob(mp3Data, { type: 'audio/mp3' });
 }
 
+//sets audio timer to wanted time in seconds
+function setTime(timeSec)
+{
+    //clamp time inside cut/trim limits
+    const absoluteMin = cutStart.value + trimStart.value;
+    const absoluteMax = cutStart.value + trimEnd.value;
+    const clamped = Math.min(Math.max(timeSec, absoluteMin), absoluteMax);
+
+    AudioRef.value.currentTime = clamped;
+    audioCurrent.value = clamped - cutStart.value;
+}
+
+//skips audio to start of trim marker
+function skipStart()
+{
+    setTime(cutStart.value + trimStart.value)
+}
+
+//skips audio to end of trim marker
+function skipEnd()
+{
+    setTime(cutStart.value + trimEnd.value)
+}
+
+//skips audio backwards
+function skipBackward()
+{
+    setTime(AudioRef.value.currentTime - 0.1);
+}
+
+//skips audio forward
+function skipForward()
+{
+    setTime(AudioRef.value.currentTime + 0.1);
+}
+
 //trim handle positions
 const startPercent = computed(() =>
   (trimStart.value / audioDuration.value) * 100
@@ -637,14 +665,17 @@ const endPercent = computed(() =>
   (trimEnd.value / audioDuration.value) * 100
 );
 
-//visual volume number
-const volumeDisplay = computed(() => {
-  return Math.round(audioVolume.value * 100) + "%";
-});
-
 const showHoverBar = computed(() => {
   return fileAdded.value && hoverVisible.value &&!dragHandle.value && !hoveringHandle.value && hoverSeekTime.value > trimStart.value && hoverSeekTime.value < trimEnd.value;
 })
+
+//play progress in %, used for progress bar
+const playPercent = computed(() => {
+  const container = ContainerRef.value;
+  if (!container || audioDuration.value === 0) return 0;
+
+  return (audioCurrent.value/audioDuration.value)*container.clientWidth;
+});
 
 //window resize
 let resizeObserver;
@@ -673,15 +704,56 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="center-wrapper">
-                <span>{{formatTime(audioCurrent)}}</span>
-                <div class="play-audio-wrapper" @click="togglePlay">
-                    <svg class="play" v-if="!audioPlaying" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
-                        <path d="M5.716 49.715a2.272 2.272 0 0 0 2.306 -0.061l36.364 -22.727a2.273 2.273 0 0 0 0 -3.855L8.023 0.345A2.273 2.273 0 0 0 4.545 2.273v45.455a2.273 2.273 0 0 0 1.171 1.988"/>
-                    </svg>
-                    <svg v-else viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M4.694 1.758A0.787 0.787 0 0 0 3.906 2.545v14.909A0.787 0.787 0 0 0 4.694 18.242h2.566A0.787 0.787 0 0 0 8.047 17.455V2.545A0.787 0.787 0 0 0 7.259 1.758zm8.047 0A0.787 0.787 0 0 0 11.953 2.545v14.909A0.787 0.787 0 0 0 12.741 18.242h2.566A0.787 0.787 0 0 0 16.094 17.455V2.545A0.787 0.787 0 0 0 15.306 1.758z"/>
-                    </svg>
-                </div>                
+                <div class="play-wrapper">
+                    <span>{{formatTime(audioCurrent)}}</span>
+                    <div class="center-buttons">
+                        <div class="player-controls" @click="skipStart">
+                            <svg width="32px" height="32px" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" transform="rotate(180)">
+                                <g stroke-width="0"></g>
+                                <g stroke-linecap="round" stroke-linejoin="round"></g>
+                                <g>
+                                    <path d="M17,2a1,1,0,0,0-1,1v7.08L7.57,4.18a1,1,0,0,0-1-.07A1,1,0,0,0,6,5V19a1,1,0,0,0,.54.89A1,1,0,0,0,7,20a1,1,0,0,0,.57-.18L16,13.92V21a1,1,0,0,0,2,0V3A1,1,0,0,0,17,2Z"></path>
+                                </g>
+                            </svg>
+                        </div>
+                        <div class="player-controls" @click="skipBackward">
+                            <svg width="32px" height="32px" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" transform="rotate(180)">
+                                <g stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g>
+                                <g >
+                                    <path id="primary" d="M21.55,11.17l-9-6a1,1,0,0,0-1,0A1,1,0,0,0,11,6v4.13l-7.45-5a1,1,0,0,0-1,0A1,1,0,0,0,2,6V18a1,1,0,0,0,.53.88,1,1,0,0,0,1-.05l7.45-5V18a1,1,0,0,0,.53.88,1,1,0,0,0,1-.05l9-6a1,1,0,0,0,0-1.66Z"></path>
+                                </g>
+                            </svg>
+                        </div>
+
+                        <div class="play-audio-wrapper" @click="togglePlay">
+                            <svg class="play" v-if="!audioPlaying" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
+                                <path d="M5.716 49.715a2.272 2.272 0 0 0 2.306 -0.061l36.364 -22.727a2.273 2.273 0 0 0 0 -3.855L8.023 0.345A2.273 2.273 0 0 0 4.545 2.273v45.455a2.273 2.273 0 0 0 1.171 1.988"/>
+                            </svg>
+                            <svg v-else viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M4.694 1.758A0.787 0.787 0 0 0 3.906 2.545v14.909A0.787 0.787 0 0 0 4.694 18.242h2.566A0.787 0.787 0 0 0 8.047 17.455V2.545A0.787 0.787 0 0 0 7.259 1.758zm8.047 0A0.787 0.787 0 0 0 11.953 2.545v14.909A0.787 0.787 0 0 0 12.741 18.242h2.566A0.787 0.787 0 0 0 16.094 17.455V2.545A0.787 0.787 0 0 0 15.306 1.758z"/>
+                            </svg>
+                        </div>
+
+                        <div class="player-controls" @click="skipForward">
+                            <svg width="32px" height="32px" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <g stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g>
+                                <g >
+                                    <path id="primary" d="M21.55,11.17l-9-6a1,1,0,0,0-1,0A1,1,0,0,0,11,6v4.13l-7.45-5a1,1,0,0,0-1,0A1,1,0,0,0,2,6V18a1,1,0,0,0,.53.88,1,1,0,0,0,1-.05l7.45-5V18a1,1,0,0,0,.53.88,1,1,0,0,0,1-.05l9-6a1,1,0,0,0,0-1.66Z"></path>
+                                </g>
+                            </svg>
+                        </div>
+                        <div class="player-controls" @click="skipEnd">
+                            <svg width="32px" height="32px" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <g stroke-width="0"></g>
+                                <g stroke-linecap="round" stroke-linejoin="round"></g>
+                                <g>
+                                    <path id="primary" d="M17,2a1,1,0,0,0-1,1v7.08L7.57,4.18a1,1,0,0,0-1-.07A1,1,0,0,0,6,5V19a1,1,0,0,0,.54.89A1,1,0,0,0,7,20a1,1,0,0,0,.57-.18L16,13.92V21a1,1,0,0,0,2,0V3A1,1,0,0,0,17,2Z"></path>
+                                </g>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+                
             </div>
 
             <div class="right-wrapper">
@@ -713,10 +785,7 @@ onBeforeUnmount(() => {
                         </svg>
                     </div>                
                 </div>
-                <div class="volume-wrap">
-                    <span>{{ volumeDisplay }}</span>
-                    <input type="range" class="volume-control" name="volume" min="0" max="2" step="0.01" v-model="audioVolume" @input="changeVolume"/>
-                </div>
+                <VolumeControl v-model="audioVolume" @update:modelValue="changeVolume"/>
             </div>
         </div>
         <div ref="ContainerRef" class="audio-visual" @click="seek" @mousemove="hoverSeek" @mouseleave="hoverLeave">
@@ -735,7 +804,7 @@ onBeforeUnmount(() => {
             <div v-show="showHoverBar" class="progress-bar hover-bar" :style="{ left: hoverSeekX + 'px' }">
                 <div class="trim-timer">{{formatTime(hoverSeekTime)}}</div>
             </div>
-            <div class="progress-bar" v-if="fileAdded" :style="{ left: playProgress + 'px' }"></div>
+            <div class="progress-bar" v-if="fileAdded" :style="{ left: playPercent + 'px' }"></div>
 
             <div class="trim-handle end" :style="{ left: endPercent + '%' }" draggable="false" @mousedown.stop="startDrag('end')" @mouseenter="hoveringHandle = true" @mouseleave="hoveringHandle = false" v-if="fileAdded">
                 <div class="trim-timer">{{formatTime(trimEnd)}}</div>
@@ -778,13 +847,60 @@ onBeforeUnmount(() => {
     justify-content: flex-end;
 }
 
-.center-wrapper 
+.play-wrapper 
 {
     display: flex;
     justify-content: center;
     align-items: center;
     flex-direction: column;
     gap: 10px;
+}
+
+.center-buttons
+{
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.player-controls 
+{
+  height: 36px;
+  min-width: 36px;
+  padding: 0 10px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 10px;
+  border: 1px solid rgba(255, 120, 60, 0.35);
+  background: rgba(255, 120, 60, 0.08);
+  color: #ff6a3d;
+
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.08s ease, box-shadow 0.15s ease;
+}
+
+.player-controls:hover 
+{
+  background: rgba(255, 120, 60, 0.18);
+  border-color: rgba(255, 120, 60, 0.6);
+  box-shadow: 0 2px 6px rgba(255, 120, 60, 0.25);
+}
+
+.player-controls:active 
+{
+  transform: translateY(1px);
+  box-shadow: 0 1px 3px rgba(255, 120, 60, 0.25);
+}
+
+.player-controls svg 
+{
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
 }
 
 .audio-visual
@@ -1031,13 +1147,4 @@ canvas
 {
     font-size: 12px;
 }
-
-.volume-wrap
-{
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-}
-
 </style>
