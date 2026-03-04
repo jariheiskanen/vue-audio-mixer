@@ -1,11 +1,11 @@
 <!--
 TODO:
 - graph timer marker scaling dynamically
-- precision setting eg. (1.52s)
-- set timers by typing
+- trim timer by typing
+- up and down arrows to change trim timer
 - fade audio in/out
 - change speed
-- save in different formats, wav, mp3 done
+- save in different formats - wav, mp3 done
 - move from lamejs to ffmpeg.wasm?
 
 -->
@@ -342,22 +342,24 @@ function setDuration(e)
     cutEnd.value = audioDuration.value;
 }
 
-//Format seconds to mm:ss.M
-function formatTime(sec) {
+// Format seconds to mm:ss.M or mm:ss.MM
+function formatTime(sec, precision = 1) {
     sec = Number(sec);
-    if(sec >= 0)
+
+    if (sec >= 0) 
     {
         const minutes = Math.floor(sec / 60);
         const seconds = Math.floor(sec % 60);
-        const tenths = Math.floor((sec % 1) * 10);
-        return `${minutes}:${seconds.toString().padStart(2,'0')}.${tenths}`;
-    }
-    else
-    {
-        return "0:00.0";
-    }
-    
 
+        const fractionMultiplier = Math.pow(10, precision);
+        const fraction = Math.floor((sec % 1) * fractionMultiplier).toString().padStart(precision, '0');
+
+        return `${minutes}:${seconds.toString().padStart(2, '0')}.${fraction}`;
+    } 
+    else 
+    {
+        return precision === 2 ? "0:00.00" : "0:00.0";
+    }
 }
 
 //start drag on trim handle
@@ -699,7 +701,7 @@ onBeforeUnmount(() => {
             <div class="left-wrapper">
                 <div class="audio-info">
                     <div>{{fileName}}</div>
-                    <div>{{formatTime(audioDuration)}}</div>
+                    <div>{{formatTime(audioDuration,2)}}</div>
                 </div>
             </div>
 
@@ -796,7 +798,9 @@ onBeforeUnmount(() => {
 
             <div class="trim-overlay left" :style="{ width: startPercent + '%' }" v-if="fileAdded"></div>
             <div class="trim-handle start" :style="{ left: startPercent + '%' }" draggable="false" @mousedown.stop="startDrag('start')" @mouseenter="hoveringHandle = true" @mouseleave="hoveringHandle = false" v-if="fileAdded">
-                <div class="trim-timer">{{formatTime(trimStart)}}</div>
+                <div class="trim-timer" @mousedown.stop @click.stop>
+                    <input class="trim-timer-input" :value="formatTime(trimStart,2)" />
+                </div>
             </div>
 
             <canvas ref="CanvasRef" class="canvas"></canvas>
@@ -807,7 +811,9 @@ onBeforeUnmount(() => {
             <div class="progress-bar" v-if="fileAdded" :style="{ left: playPercent + 'px' }"></div>
 
             <div class="trim-handle end" :style="{ left: endPercent + '%' }" draggable="false" @mousedown.stop="startDrag('end')" @mouseenter="hoveringHandle = true" @mouseleave="hoveringHandle = false" v-if="fileAdded">
-                <div class="trim-timer">{{formatTime(trimEnd)}}</div>
+                <div class="trim-timer" @mousedown.stop @click.stop>
+                    <input class="trim-timer-input" :value="formatTime(trimEnd,2)" />
+                </div>
             </div>
             <div class="trim-overlay right" :style="{ width: (100 - endPercent) + '%' }" v-if="fileAdded"></div>
         </div>
@@ -909,7 +915,7 @@ onBeforeUnmount(() => {
     display: flex;
     justify-content: center;
     height: 86px;
-    margin: 0px 30px;
+    margin: 0px 36px;
 }
 
 .add-audio-label
@@ -1078,6 +1084,7 @@ canvas
     box-shadow: 0 2px 6px rgba(0,0,0,0.3);
     user-select: none;
     background: white;
+    cursor: auto;
 }
 
 .trim-timer::after 
@@ -1090,6 +1097,28 @@ canvas
   border-width: 5px;
   border-style: solid;
   border-color: white transparent transparent transparent;
+}
+
+.trim-timer-input
+{
+    max-width: 40px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid currentColor;
+    color: inherit;
+    text-align: center;
+    font-size: 12px;
+    padding: 0 2px;
+    outline: none;
+    background-color: #fff4f0;
+    transition: border .2s linear;
+    border-bottom-color: #ff3b3b;
+}
+
+.trim-timer-input:hover, .trim-timer-input:focus
+{
+    border-bottom-color: #ff6b6b;
+    background-color: #fff0ea;
 }
 
 .trim-overlay
