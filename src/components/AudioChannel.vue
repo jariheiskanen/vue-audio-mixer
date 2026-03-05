@@ -1,18 +1,19 @@
 <!--
 TODO:
 - graph timer marker scaling dynamically
-- trim timer by typing
 - up and down arrows to change trim timer
 - fade audio in/out
 - change speed
 - save in different formats - wav, mp3 done
 - move from lamejs to ffmpeg.wasm?
+- formatTime is defined in both AudioChannel and TrimInput, consider seperate file
 
 -->
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
-import VolumeControl from './VolumeControl.vue'
+import VolumeControl from './VolumeControl.vue';
+import TrimMarker from './TrimMarker.vue';
 import lamejs from 'lamejs';
 
 /*globals need to be defined manually because its an old library*/
@@ -348,11 +349,11 @@ function formatTime(sec, precision = 1) {
 
     if (sec >= 0) 
     {
-        const minutes = Math.floor(sec / 60);
-        const seconds = Math.floor(sec % 60);
+        const minutes = Math.round(sec / 60);
+        const seconds = Math.round(sec % 60);
 
         const fractionMultiplier = Math.pow(10, precision);
-        const fraction = Math.floor((sec % 1) * fractionMultiplier).toString().padStart(precision, '0');
+        const fraction = Math.round((sec % 1) * fractionMultiplier).toString().padStart(precision, '0');
 
         return `${minutes}:${seconds.toString().padStart(2, '0')}.${fraction}`;
     } 
@@ -658,6 +659,26 @@ function skipForward()
     setTime(AudioRef.value.currentTime + 0.1);
 }
 
+//keep trim inside trim values
+function updateTrim(value, type)
+{
+    const minGap = 0.1;
+    if (type === "start") 
+    {
+        trimStart.value = clamp(value, 0, trimEnd.value - minGap);
+    } 
+    else if (type === "end") 
+    {
+        trimEnd.value = clamp(value, trimStart.value + minGap, audioDuration.value);
+    }
+}
+
+//helper function to clamp values into restrictions
+function clamp(value, min, max) 
+{
+  return Math.min(Math.max(value, min), max);
+}
+
 //trim handle positions
 const startPercent = computed(() =>
   (trimStart.value / audioDuration.value) * 100
@@ -798,9 +819,7 @@ onBeforeUnmount(() => {
 
             <div class="trim-overlay left" :style="{ width: startPercent + '%' }" v-if="fileAdded"></div>
             <div class="trim-handle start" :style="{ left: startPercent + '%' }" draggable="false" @mousedown.stop="startDrag('start')" @mouseenter="hoveringHandle = true" @mouseleave="hoveringHandle = false" v-if="fileAdded">
-                <div class="trim-timer" @mousedown.stop @click.stop>
-                    <input class="trim-timer-input" :value="formatTime(trimStart,2)" />
-                </div>
+                <TrimMarker v-model="trimStart" :precision="2" @update:modelValue="value => updateTrim(value, 'start')"/>
             </div>
 
             <canvas ref="CanvasRef" class="canvas"></canvas>
@@ -811,9 +830,7 @@ onBeforeUnmount(() => {
             <div class="progress-bar" v-if="fileAdded" :style="{ left: playPercent + 'px' }"></div>
 
             <div class="trim-handle end" :style="{ left: endPercent + '%' }" draggable="false" @mousedown.stop="startDrag('end')" @mouseenter="hoveringHandle = true" @mouseleave="hoveringHandle = false" v-if="fileAdded">
-                <div class="trim-timer" @mousedown.stop @click.stop>
-                    <input class="trim-timer-input" :value="formatTime(trimEnd,2)" />
-                </div>
+                <TrimMarker v-model="trimEnd" :precision="2" @update:modelValue="value => updateTrim(value, 'end')"/>
             </div>
             <div class="trim-overlay right" :style="{ width: (100 - endPercent) + '%' }" v-if="fileAdded"></div>
         </div>
@@ -1067,58 +1084,6 @@ canvas
   height: 40%;
   border-radius: 2px;
   background: rgba(171, 203, 255, 0.9);
-}
-
-.trim-timer
-{
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    margin-bottom: 6px;
-    padding: 4px 8px;
-    font-size: 12px;
-    font-family: sans-serif;
-    border-radius: 4px;
-    white-space: nowrap;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-    user-select: none;
-    background: white;
-    cursor: auto;
-}
-
-.trim-timer::after 
-{
-  content: '';
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  border-width: 5px;
-  border-style: solid;
-  border-color: white transparent transparent transparent;
-}
-
-.trim-timer-input
-{
-    max-width: 40px;
-    background: transparent;
-    border: none;
-    border-bottom: 1px solid currentColor;
-    color: inherit;
-    text-align: center;
-    font-size: 12px;
-    padding: 0 2px;
-    outline: none;
-    background-color: #fff4f0;
-    transition: border .2s linear;
-    border-bottom-color: #ff3b3b;
-}
-
-.trim-timer-input:hover, .trim-timer-input:focus
-{
-    border-bottom-color: #ff6b6b;
-    background-color: #fff0ea;
 }
 
 .trim-overlay
