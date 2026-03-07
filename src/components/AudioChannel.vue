@@ -1,12 +1,15 @@
 <!--
 TODO:
-- graph timer marker scaling dynamically
-- up and down arrows to change trim timer
 - fade audio in/out
 - change speed
+- audio play timer does not stick to trim marker if editing the input manually
+- zoom function
+- padding inside audio channel so audio can start as example 5 seconds in
+
 - save in different formats - wav, mp3 done
 - move from lamejs to ffmpeg.wasm?
 - formatTime is defined in both AudioChannel and TrimInput, consider seperate file
+- trimTimer css is defined in both
 
 -->
 
@@ -170,38 +173,45 @@ function drawVolumeGraph(canvas, data)
     drawMarkers(ctx, width, height);
 }
 
-//draw timer markers
-function drawMarkers(ctx, width, height) 
+function drawMarkers(ctx, width, height)
 {
-    const interval = 1; //interval of markers in seconds
-    const min_spacing = 50; //minimum allowed distance between markers
-
-    //line styling
+    //init options
+    const min_spacing = 60; //px
     ctx.font = '10px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.fillStyle = 'white';
-    ctx.lineStyle = 'white';
 
-    let last_drawn_x = 0 - min_spacing;
-    for(let time=0; time<=audioDuration.value; time+=interval) 
+    const duration = audioDuration.value; //in s
+    const secPerPixel = duration / width; //seconds represented by one pixel
+    const minSeconds = secPerPixel * min_spacing; //minimum seconds between markers
+
+    // choose a logical interval for user
+    const niceIntervals = [0.1,0.2,0.5,1,2,5,10,15,30,60,120,300];
+    let interval = niceIntervals.find(v => v >= minSeconds) || 600;
+    let last_drawn_x = -min_spacing;
+
+    for(let time=0; time<=duration; time += interval)
     {
-        const x = (time/audioDuration.value)*width;
+        const x = (time/duration) * width;
+
         if(last_drawn_x + min_spacing <= x)
         {
             ctx.strokeStyle = 'rgba(255,255,255,0.8)';
             ctx.lineWidth = 1;
-            // Draw tick line
+
             ctx.beginPath();
             ctx.moveTo(x, height - 7);
             ctx.lineTo(x, height);
             ctx.stroke();
 
+            const label = formatTime(time, 1);
+
             ctx.strokeStyle = 'black';
             ctx.lineWidth = 2;
-            // Draw label
-            ctx.strokeText(time, x + 2, height - 18);
-            ctx.fillText(time, x + 2, height - 18);
+            ctx.strokeText(label, x + 2, height - 18);
+            ctx.fillText(label, x + 2, height - 18);
+
             last_drawn_x = x;
         }
     }
@@ -1084,6 +1094,36 @@ canvas
   height: 40%;
   border-radius: 2px;
   background: rgba(171, 203, 255, 0.9);
+}
+
+.trim-timer
+{
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-bottom: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-family: sans-serif;
+    border-radius: 4px;
+    white-space: nowrap;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    user-select: none;
+    background: white;
+    cursor: auto;
+}
+
+.trim-timer::after 
+{
+content: '';
+position: absolute;
+top: 100%;
+left: 50%;
+transform: translateX(-50%);
+border-width: 5px;
+border-style: solid;
+border-color: white transparent transparent transparent;
 }
 
 .trim-overlay

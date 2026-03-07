@@ -31,11 +31,24 @@ function commitEdit()
   inputValue.value = formatTime(parsed ?? props.modelValue, props.precision);
 }
 
-//commit on enter
+//commit on enter, up and down to change timer
 function handleKeydown(e) 
 {
   if(e.key === 'Enter')
   {
+    commitEdit();
+  }
+  if (e.key === "ArrowUp" || e.key === "ArrowDown") 
+  {
+    e.preventDefault();
+
+    const step = Math.pow(10, -props.precision); // 0.01 if precision=2
+    let value = timeToSeconds(inputValue.value);
+
+    if (e.key === "ArrowUp") value += step;
+    if (e.key === "ArrowDown") value -= step;
+
+    inputValue.value = formatTime(value, props.precision);
     commitEdit();
   }
 }
