@@ -4,7 +4,7 @@ TODO:
 - change speed
 - audio play timer does not stick to trim marker if editing the input manually
 - zoom function
-- padding inside audio channel so audio can start as example 5 seconds in
+- move added audio file inside timeline
 
 - save in different formats - wav, mp3 done
 - move from lamejs to ffmpeg.wasm?
@@ -14,7 +14,7 @@ TODO:
 -->
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount} from 'vue';
 import VolumeControl from './VolumeControl.vue';
 import TrimMarker from './TrimMarker.vue';
 import lamejs from 'lamejs';
@@ -28,8 +28,13 @@ window.Lame = Lame;
 window.BitStream = BitStream;
 
 
+const props = defineProps({
+  timelineDuration: Number,
+  start: Number,
+  duration: Number
+})
 
-const emit = defineEmits(['file-added']);
+const emit = defineEmits(['file-added', 'duration']);
 
 const fileRef = ref(null);
 const AudioRef = ref(null);
@@ -351,6 +356,8 @@ function setDuration(e)
     audioDuration.value = e.target.duration;
     trimEnd.value = audioDuration.value;
     cutEnd.value = audioDuration.value;
+
+    emit('duration', audioDuration.value);
 }
 
 // Format seconds to mm:ss.M or mm:ss.MM
@@ -710,6 +717,18 @@ const playPercent = computed(() => {
   return (audioCurrent.value/audioDuration.value)*container.clientWidth;
 });
 
+//width based on longest audio channel
+const widthPercent = computed(() => {
+  if (!props.timelineDuration || !props.duration) return 100;
+  return (props.duration / props.timelineDuration) * 100;
+});
+
+//start time of audio channel
+const offsetPercent = computed(() => {
+  if (!props.timelineDuration) return 0;
+  return (props.start / props.timelineDuration) * 100;
+});
+
 //window resize
 let resizeObserver;
 onMounted(() => {
@@ -821,28 +840,30 @@ onBeforeUnmount(() => {
                 <VolumeControl v-model="audioVolume" @update:modelValue="changeVolume"/>
             </div>
         </div>
-        <div ref="ContainerRef" class="audio-visual" @click="seek" @mousemove="hoverSeek" @mouseleave="hoverLeave">
-            <label v-show="showUpload" class="add-audio-label"><div class="circle">+</div>
-                <input type="file" accept="audio/*" @change="handleFile" hidden />
-            </label>
-            <audio ref="AudioRef" accept="audio/*" hidden @play="startPlay" @pause="pausePlay" @loadedmetadata="setDuration"></audio>
+        <div class="audio-visual-wrap">
+            <div ref="ContainerRef" class="audio-visual" @click="seek" @mousemove="hoverSeek" @mouseleave="hoverLeave" :style="{left: offsetPercent + '%',width: widthPercent + '%'}">
+                <label v-show="showUpload" class="add-audio-label"><div class="circle">+</div>
+                    <input type="file" accept="audio/*" @change="handleFile" hidden />
+                </label>
+                <audio ref="AudioRef" accept="audio/*" hidden @play="startPlay" @pause="pausePlay" @loadedmetadata="setDuration"></audio>
 
-            <div class="trim-overlay left" :style="{ width: startPercent + '%' }" v-if="fileAdded"></div>
-            <div class="trim-handle start" :style="{ left: startPercent + '%' }" draggable="false" @mousedown.stop="startDrag('start')" @mouseenter="hoveringHandle = true" @mouseleave="hoveringHandle = false" v-if="fileAdded">
-                <TrimMarker v-model="trimStart" :precision="2" @update:modelValue="value => updateTrim(value, 'start')"/>
+                <div class="trim-overlay left" :style="{ width: startPercent + '%' }" v-if="fileAdded"></div>
+                <div class="trim-handle start" :style="{ left: startPercent + '%' }" draggable="false" @mousedown.stop="startDrag('start')" @mouseenter="hoveringHandle = true" @mouseleave="hoveringHandle = false" v-if="fileAdded">
+                    <TrimMarker v-model="trimStart" :precision="2" @update:modelValue="value => updateTrim(value, 'start')"/>
+                </div>
+
+                <canvas ref="CanvasRef" class="canvas"></canvas>
+
+                <div v-show="showHoverBar" class="progress-bar hover-bar" :style="{ left: hoverSeekX + 'px' }">
+                    <div class="trim-timer">{{formatTime(hoverSeekTime)}}</div>
+                </div>
+                <div class="progress-bar" v-if="fileAdded" :style="{ left: playPercent + 'px' }"></div>
+
+                <div class="trim-handle end" :style="{ left: endPercent + '%' }" draggable="false" @mousedown.stop="startDrag('end')" @mouseenter="hoveringHandle = true" @mouseleave="hoveringHandle = false" v-if="fileAdded">
+                    <TrimMarker v-model="trimEnd" :precision="2" @update:modelValue="value => updateTrim(value, 'end')"/>
+                </div>
+                <div class="trim-overlay right" :style="{ width: (100 - endPercent) + '%' }" v-if="fileAdded"></div>
             </div>
-
-            <canvas ref="CanvasRef" class="canvas"></canvas>
-
-            <div v-show="showHoverBar" class="progress-bar hover-bar" :style="{ left: hoverSeekX + 'px' }">
-                <div class="trim-timer">{{formatTime(hoverSeekTime)}}</div>
-            </div>
-            <div class="progress-bar" v-if="fileAdded" :style="{ left: playPercent + 'px' }"></div>
-
-            <div class="trim-handle end" :style="{ left: endPercent + '%' }" draggable="false" @mousedown.stop="startDrag('end')" @mouseenter="hoveringHandle = true" @mouseleave="hoveringHandle = false" v-if="fileAdded">
-                <TrimMarker v-model="trimEnd" :precision="2" @update:modelValue="value => updateTrim(value, 'end')"/>
-            </div>
-            <div class="trim-overlay right" :style="{ width: (100 - endPercent) + '%' }" v-if="fileAdded"></div>
         </div>
     </div>
 </template>
@@ -936,13 +957,17 @@ onBeforeUnmount(() => {
   fill: currentColor;
 }
 
+.audio-visual-wrap
+{
+    margin: 0px 36px;
+}
+
 .audio-visual
 {
     position: relative;
     display: flex;
     justify-content: center;
     height: 86px;
-    margin: 0px 36px;
 }
 
 .add-audio-label
