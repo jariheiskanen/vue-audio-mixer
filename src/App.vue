@@ -34,9 +34,16 @@ const timelineDuration = computed(() =>
   Math.max(...channels.value.map(c => c.start + c.duration), 0)
 );
 
+//update duration
 function updateDuration(index, duration) 
 {
   channels.value[index].duration = duration;
+}
+
+//update starting point (from dragging)
+function updateStart(index, value)
+{
+  channels.value[index].start = value
 }
 </script>
 
@@ -46,7 +53,7 @@ function updateDuration(index, duration)
       <!--main section here-->
     </div>
     <div class="channel-wrapper">
-      <AudioChannel v-for="i in channelCount" :key="i" :file="audioFiles[i-1] || null" :timeline-duration="timelineDuration" :start="channels[i-1].start" :duration="channels[i-1].duration" @duration="updateDuration(i-1, $event)" @file-added="handleFileAdded"/>
+      <AudioChannel v-for="i in channelCount" :key="i" :file="audioFiles[i-1] || null" :timeline-duration="timelineDuration" :start="channels[i-1].start" :duration="channels[i-1].duration" @duration="updateDuration(i-1, $event)" @file-added="handleFileAdded" @update:start="updateStart(i-1,$event)"/>
     </div>
   </div>
 </template>

@@ -4,12 +4,22 @@ TODO:
 - change speed
 - audio play timer does not stick to trim marker if editing the input manually
 - zoom function
-- move added audio file inside timeline
+
+- change audio channel timers to be synced create seperate canvas?
+- show current channel start time, show it in trim markers?
+- improve drag handle visual
+- extend timeline when dragging to right side
+- add overflow to audio graph and sync their movement
+- make default width based on longest added audio
 
 - save in different formats - wav, mp3 done
 - move from lamejs to ffmpeg.wasm?
 - formatTime is defined in both AudioChannel and TrimInput, consider seperate file
 - trimTimer css is defined in both
+- have only one player control and add option to disable tracks instead?
+    > Easier scrolling
+    > Single timer markers
+    > Easier zooming
 
 -->
 
@@ -34,7 +44,7 @@ const props = defineProps({
   duration: Number
 })
 
-const emit = defineEmits(['file-added', 'duration']);
+const emit = defineEmits(['file-added', 'update:start', 'duration']);
 
 const fileRef = ref(null);
 const AudioRef = ref(null);
@@ -43,6 +53,9 @@ const ContainerRef = ref(null);
 const audioCtx = new AudioContext();
 const gainNode = ref(null);
 const AudioBuffer = ref(null);
+
+//config
+const pxPerSecond = ref(200);
 
 const showUpload = ref(true); //shows upload button when audio file hasn't been added
 const audioPlaying = ref(false); //true when audio file is being played
@@ -69,6 +82,10 @@ const hoveringHandle = ref(false); //hovering drag handle
 //cut timers
 const cutStart = ref(0); //start of cut file in s
 const cutEnd = ref(0); //end of cut file in s
+
+//channel drag
+const channelDragging = ref(false);
+const channelX = ref(false);
 
 let animationId = null; //used for audio progress animation
 let animationId2 = null; //used for timer progress
@@ -696,6 +713,42 @@ function clamp(value, min, max)
   return Math.min(Math.max(value, min), max);
 }
 
+//channel dragging
+function moveChannel(e)
+{
+  channelDragging.value = true;
+  const rect = ContainerRef.value.getBoundingClientRect();
+  channelX.value = e.clientX - rect.left;
+
+  window.addEventListener("mousemove", onMoveChannel);
+  window.addEventListener("mouseup", stopMoveChannel);
+}
+
+function onMoveChannel(e)
+{
+    if (!channelDragging.value) return;
+
+    const rect = ContainerRef.value.getBoundingClientRect();
+    const currentX = e.clientX - rect.left;
+    const dx = currentX - channelX.value;
+
+    const timelineWidth = ContainerRef.value.offsetWidth;
+    const secondsPerPixel = props.timelineDuration / timelineWidth;
+
+    const newStart = props.start + dx * secondsPerPixel;
+    const maxStart = props.timelineDuration - props.duration;
+    const clampedStart = clamp(newStart, 0, maxStart);
+
+    emit("update:start", Math.max(0, clampedStart));
+}
+
+function stopMoveChannel()
+{
+  channelDragging.value = false;
+  window.removeEventListener("mousemove", onMoveChannel);
+  window.removeEventListener("mouseup", stopMoveChannel);
+}
+
 //trim handle positions
 const startPercent = computed(() =>
   (trimStart.value / audioDuration.value) * 100
@@ -717,16 +770,15 @@ const playPercent = computed(() => {
   return (audioCurrent.value/audioDuration.value)*container.clientWidth;
 });
 
-//width based on longest audio channel
-const widthPercent = computed(() => {
-  if (!props.timelineDuration || !props.duration) return 100;
-  return (props.duration / props.timelineDuration) * 100;
+//pixel based audio graph calculation
+const leftPx = computed(() => {
+    if (!props.timelineDuration || !props.duration) return "0%";
+    return props.start * pxPerSecond.value + 'px';
 });
 
-//start time of audio channel
-const offsetPercent = computed(() => {
-  if (!props.timelineDuration) return 0;
-  return (props.start / props.timelineDuration) * 100;
+const widthPx = computed(() => {
+    if (!props.timelineDuration || !props.duration) return "100%";
+    return props.duration * pxPerSecond.value + 'px';
 });
 
 //window resize
@@ -841,7 +893,8 @@ onBeforeUnmount(() => {
             </div>
         </div>
         <div class="audio-visual-wrap">
-            <div ref="ContainerRef" class="audio-visual" @click="seek" @mousemove="hoverSeek" @mouseleave="hoverLeave" :style="{left: offsetPercent + '%',width: widthPercent + '%'}">
+            <!--<div ref="ContainerRef" class="audio-visual" @click="seek" @mousemove="hoverSeek" @mouseleave="hoverLeave" :style="{left: offsetPercent + '%',width: widthPercent + '%'}">-->
+            <div ref="ContainerRef" class="audio-visual" @click="seek" @mousemove="hoverSeek" @mouseleave="hoverLeave" :style="{left: leftPx,width: widthPx}">
                 <label v-show="showUpload" class="add-audio-label"><div class="circle">+</div>
                     <input type="file" accept="audio/*" @change="handleFile" hidden />
                 </label>
@@ -852,7 +905,8 @@ onBeforeUnmount(() => {
                     <TrimMarker v-model="trimStart" :precision="2" @update:modelValue="value => updateTrim(value, 'start')"/>
                 </div>
 
-                <canvas ref="CanvasRef" class="canvas"></canvas>
+                <div class="move-handle" @mousedown.stop="moveChannel" @mousemove.stop @click.stop v-if="fileAdded"></div>
+                <canvas ref="CanvasRef" class="canvas"></canvas>                
 
                 <div v-show="showHoverBar" class="progress-bar hover-bar" :style="{ left: hoverSeekX + 'px' }">
                     <div class="trim-timer">{{formatTime(hoverSeekTime)}}</div>
@@ -959,7 +1013,8 @@ onBeforeUnmount(() => {
 
 .audio-visual-wrap
 {
-    margin: 0px 36px;
+    padding: 0px 36px;
+    background-color: #cfcfcf;
 }
 
 .audio-visual
@@ -968,6 +1023,7 @@ onBeforeUnmount(() => {
     display: flex;
     justify-content: center;
     height: 86px;
+    background-color: white;
 }
 
 .add-audio-label
@@ -1205,5 +1261,19 @@ border-color: white transparent transparent transparent;
 .audio-info
 {
     font-size: 12px;
+}
+
+.move-handle
+{
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 20px;
+  height: 8px;
+  background: #ff6a6a;
+  border-radius: 4px;
+  cursor: grab;
+  user-select: none;
 }
 </style>
