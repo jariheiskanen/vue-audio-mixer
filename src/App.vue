@@ -5,7 +5,7 @@ npm run deploy
 -->
 
 <script setup>
-import {ref, computed} from 'vue';
+import {ref, computed, onMounted, onUnmounted} from 'vue';
 import AudioChannel from './components/AudioChannel.vue'
 
 const audioFiles = ref([]);
@@ -16,6 +16,8 @@ const channels = ref([
   {id: 3, duration: 0, start: 0 },
   {id: 4, duration: 0, start: 0 }
 ]); //length of each audio file and starting point in s
+const zoom_level = ref(1);
+const scrollLeft = ref(0);
 
 //adds files to an array
 function handleFileAdded(file) 
@@ -45,6 +47,43 @@ function updateStart(index, value)
 {
   channels.value[index].start = value
 }
+
+function handleWheel(e)
+{
+  // OPTIONAL: require Ctrl key (like real editors)
+  //if (!e.ctrlKey) return;
+  if (!e.target.closest('.audio-visual-wrap')) return;
+  e.preventDefault();
+
+  const zoomFactor = 1.1;
+  if (e.deltaY < 0)
+  {
+    // zoom in
+    zoom_level.value *= zoomFactor;
+  }
+  else
+  {
+    // zoom out
+    zoom_level.value /= zoomFactor;
+  }
+
+  // clamp zoom
+  zoom_level.value = Math.min(5, Math.max(0.2, zoom_level.value));
+}
+
+function onGraphScroll(scroll)
+{
+  scrollLeft.value = scroll;
+}
+
+onMounted(() => {
+  window.addEventListener('wheel', handleWheel, { passive: false });
+})
+
+onUnmounted(() => {
+  window.removeEventListener('wheel', handleWheel);
+})
+
 </script>
 
 <template>
@@ -53,7 +92,7 @@ function updateStart(index, value)
       <!--main section here-->
     </div>
     <div class="channel-wrapper">
-      <AudioChannel v-for="i in channelCount" :key="i" :file="audioFiles[i-1] || null" :timeline-duration="timelineDuration" :start="channels[i-1].start" :duration="channels[i-1].duration" @duration="updateDuration(i-1, $event)" @file-added="handleFileAdded" @update:start="updateStart(i-1,$event)"/>
+      <AudioChannel v-for="i in channelCount" :key="i" :file="audioFiles[i-1] || null" :timeline-duration="timelineDuration" :start="channels[i-1].start" :duration="channels[i-1].duration" @duration="updateDuration(i-1, $event)" @file-added="handleFileAdded" @update:start="updateStart(i-1,$event)" :zoom-level="zoom_level" :scroll-left="scrollLeft" @scroll:graph="onGraphScroll"/>
     </div>
   </div>
 </template>

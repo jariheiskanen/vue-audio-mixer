@@ -16,15 +16,11 @@ TODO:
 - move from lamejs to ffmpeg.wasm?
 - formatTime is defined in both AudioChannel and TrimInput, consider seperate file
 - trimTimer css is defined in both
-- have only one player control and add option to disable tracks instead?
-    > Easier scrolling
-    > Single timer markers
-    > Easier zooming
 
 -->
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount} from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch} from 'vue';
 import VolumeControl from './VolumeControl.vue';
 import TrimMarker from './TrimMarker.vue';
 import lamejs from 'lamejs';
@@ -41,21 +37,20 @@ window.BitStream = BitStream;
 const props = defineProps({
   timelineDuration: Number,
   start: Number,
-  duration: Number
+  duration: Number,
+  zoomLevel: Number
 })
 
-const emit = defineEmits(['file-added', 'update:start', 'duration']);
+const emit = defineEmits(['file-added', 'update:start', 'duration', 'scroll:graph']);
 
 const fileRef = ref(null);
 const AudioRef = ref(null);
 const CanvasRef = ref(null);
 const ContainerRef = ref(null);
+const scrollRef = ref(null);
 const audioCtx = new AudioContext();
 const gainNode = ref(null);
 const AudioBuffer = ref(null);
-
-//config
-const pxPerSecond = ref(200);
 
 const showUpload = ref(true); //shows upload button when audio file hasn't been added
 const audioPlaying = ref(false); //true when audio file is being played
@@ -156,6 +151,10 @@ function setupCanvas(canvas)
 
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
+    /*
+    canvas.width = widthPx.value * dpr;
+    canvas.height = rect.height * dpr;
+    */
 
     const ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
@@ -732,10 +731,8 @@ function onMoveChannel(e)
     const currentX = e.clientX - rect.left;
     const dx = currentX - channelX.value;
 
-    const timelineWidth = ContainerRef.value.offsetWidth;
-    const secondsPerPixel = props.timelineDuration / timelineWidth;
-
-    const newStart = props.start + dx * secondsPerPixel;
+    const secondsMoved = dx / pxPerSecond.value;
+    const newStart = props.start + secondsMoved;
     const maxStart = props.timelineDuration - props.duration;
     const clampedStart = clamp(newStart, 0, maxStart);
 
@@ -747,6 +744,13 @@ function stopMoveChannel()
   channelDragging.value = false;
   window.removeEventListener("mousemove", onMoveChannel);
   window.removeEventListener("mouseup", stopMoveChannel);
+}
+
+//syncs scrolling
+function handleScroll(e)
+{
+    if (!e || !e.target) return;
+    emit('scroll:graph', e.target.scrollLeft);
 }
 
 //trim handle positions
@@ -781,6 +785,10 @@ const widthPx = computed(() => {
     return props.duration * pxPerSecond.value + 'px';
 });
 
+//how wide one second is, multiplied by zoom
+const basePxPerSecond = 100;
+const pxPerSecond = computed(() => basePxPerSecond * props.zoomLevel);
+
 //window resize
 let resizeObserver;
 onMounted(() => {
@@ -794,6 +802,12 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObserver.disconnect();
 });
+
+watch(() => props.scrollLeft, val => {
+  if (scrollRef.value && scrollRef.value.scrollLeft !== val) {
+    scrollRef.value.scrollLeft = val
+  }
+})
 
 </script>
 
@@ -892,8 +906,7 @@ onBeforeUnmount(() => {
                 <VolumeControl v-model="audioVolume" @update:modelValue="changeVolume"/>
             </div>
         </div>
-        <div class="audio-visual-wrap">
-            <!--<div ref="ContainerRef" class="audio-visual" @click="seek" @mousemove="hoverSeek" @mouseleave="hoverLeave" :style="{left: offsetPercent + '%',width: widthPercent + '%'}">-->
+        <div class="audio-visual-wrap" ref="scrollRef" @scroll="handleScroll">
             <div ref="ContainerRef" class="audio-visual" @click="seek" @mousemove="hoverSeek" @mouseleave="hoverLeave" :style="{left: leftPx,width: widthPx}">
                 <label v-show="showUpload" class="add-audio-label"><div class="circle">+</div>
                     <input type="file" accept="audio/*" @change="handleFile" hidden />
@@ -936,7 +949,7 @@ onBeforeUnmount(() => {
     display: flex;
     justify-content: center;
     align-items: center;
-    padding: 10px 0px 30px 0px;
+    padding: 10px 0px 0px 0px;
     border-bottom: 2px solid #e9e9e9;
     color: #ff3b3b;
     font-weight: bold;
@@ -1013,7 +1026,9 @@ onBeforeUnmount(() => {
 
 .audio-visual-wrap
 {
+    overflow-x: auto;
     padding: 0px 36px;
+    padding-top: 30px;
     background-color: #cfcfcf;
 }
 
