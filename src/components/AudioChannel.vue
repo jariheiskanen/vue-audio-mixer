@@ -2,15 +2,15 @@
 TODO:
 - fade audio in/out
 - change speed
-- audio play timer does not stick to trim marker if editing the input manually
-- zoom function
 
-- change audio channel timers to be synced create seperate canvas?
-- show current channel start time, show it in trim markers?
-- improve drag handle visual
+- !!! set timelineDuration properly, currently it is base done based on previously added longest one
 - extend timeline when dragging to right side
 - add overflow to audio graph and sync their movement
-- make default width based on longest added audio
+- update marker timers to add start offset
+- fix visuals on padding fix
+- smaller timeline doesn't have margin on the right side unless file is dragged there
+- limit trim marker timer to not go past duration of it
+- audio play timer does not stick to trim marker if editing the input manually
 
 - save in different formats - wav, mp3 done
 - move from lamejs to ffmpeg.wasm?
@@ -46,6 +46,7 @@ const emit = defineEmits(['file-added', 'update:start', 'duration', 'scroll:grap
 const fileRef = ref(null);
 const AudioRef = ref(null);
 const CanvasRef = ref(null);
+const MarkerRef = ref(null);
 const ContainerRef = ref(null);
 const scrollRef = ref(null);
 const audioCtx = new AudioContext();
@@ -144,17 +145,28 @@ function normalize(data)
 }
 
 //sharpens the graph
-function setupCanvas(canvas) 
+function setupCanvas(canvas, customWidth = null) 
 {
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
+    let width, height;
 
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    /*
-    canvas.width = widthPx.value * dpr;
-    canvas.height = rect.height * dpr;
-    */
+    if(customWidth) //use timeline size
+    {
+        width = customWidth;
+        height = rect.height;
+
+        canvas.style.width = width + 'px';
+        canvas.style.height = height + 'px';
+    }
+    else //use canvas size
+    {
+        width = rect.width;
+        height = rect.height;
+    }
+
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
 
     const ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
@@ -166,7 +178,9 @@ function setupCanvas(canvas)
 function drawVolumeGraph(canvas, data) 
 {
     //init canvas
+    const timelineWidth = props.timelineDuration * pxPerSecond.value;
     const ctx = setupCanvas(canvas);
+    const marker_ctx = setupCanvas(MarkerRef.value, timelineWidth);
     const width = canvas.width;
     const height = canvas.height;
 
@@ -191,10 +205,11 @@ function drawVolumeGraph(canvas, data)
     ctx.fillStyle = "#0da90d";
     ctx.fill();
 
-    drawMarkers(ctx, width, height);
+    drawMarkers(marker_ctx);
 }
 
-function drawMarkers(ctx, width, height)
+//draw canvas markers on seperate canvas
+function drawMarkers(ctx)
 {
     //init options
     const min_spacing = 60; //px
@@ -203,8 +218,11 @@ function drawMarkers(ctx, width, height)
     ctx.textBaseline = 'top';
     ctx.fillStyle = 'white';
 
-    const duration = audioDuration.value; //in s
-    const secPerPixel = duration / width; //seconds represented by one pixel
+    const dpr = window.devicePixelRatio || 1;
+    const height = MarkerRef.value.height / dpr;
+    const width = props.timelineDuration * pxPerSecond.value;
+    const duration = props.timelineDuration; //in s  
+    const secPerPixel = duration / width; //seconds represented by one pixel  
     const minSeconds = secPerPixel * min_spacing; //minimum seconds between markers
 
     // choose a logical interval for user
@@ -215,14 +233,13 @@ function drawMarkers(ctx, width, height)
     for(let time=0; time<=duration; time += interval)
     {
         const x = (time/duration) * width;
-
         if(last_drawn_x + min_spacing <= x)
         {
             ctx.strokeStyle = 'rgba(255,255,255,0.8)';
             ctx.lineWidth = 1;
 
             ctx.beginPath();
-            ctx.moveTo(x, height - 7);
+            ctx.moveTo(x, 0);
             ctx.lineTo(x, height);
             ctx.stroke();
 
@@ -356,8 +373,7 @@ function hoverSeek(e)
     hoverSeekX.value = x;
     hoverVisible.value = true;
 
-    const percent = x / rect.width;
-    hoverSeekTime.value = percent * audioDuration.value;
+    hoverSeekTime.value = x / pxPerSecond.value;
 }
 
 //mouse exit hover zone
@@ -380,13 +396,13 @@ function setDuration(e)
 function formatTime(sec, precision = 1) {
     sec = Number(sec);
 
-    if (sec >= 0) 
+    if(sec >= 0) 
     {
-        const minutes = Math.round(sec / 60);
-        const seconds = Math.round(sec % 60);
+        const minutes = Math.floor(sec / 60);
+        const seconds = Math.floor(sec % 60);
 
         const fractionMultiplier = Math.pow(10, precision);
-        const fraction = Math.round((sec % 1) * fractionMultiplier).toString().padStart(precision, '0');
+        const fraction = Math.floor((sec % 1) * fractionMultiplier).toString().padStart(precision, '0');
 
         return `${minutes}:${seconds.toString().padStart(2, '0')}.${fraction}`;
     } 
@@ -907,6 +923,7 @@ watch(() => props.scrollLeft, val => {
             </div>
         </div>
         <div class="audio-visual-wrap" ref="scrollRef" @scroll="handleScroll">
+            <canvas ref="MarkerRef" class="canvas marker-canvas" v-if="fileAdded"></canvas>
             <div ref="ContainerRef" class="audio-visual" @click="seek" @mousemove="hoverSeek" @mouseleave="hoverLeave" :style="{left: leftPx,width: widthPx}">
                 <label v-show="showUpload" class="add-audio-label"><div class="circle">+</div>
                     <input type="file" accept="audio/*" @change="handleFile" hidden />
@@ -919,7 +936,8 @@ watch(() => props.scrollLeft, val => {
                 </div>
 
                 <div class="move-handle" @mousedown.stop="moveChannel" @mousemove.stop @click.stop v-if="fileAdded"></div>
-                <canvas ref="CanvasRef" class="canvas"></canvas>                
+                <canvas ref="CanvasRef" class="canvas"></canvas>
+                
 
                 <div v-show="showHoverBar" class="progress-bar hover-bar" :style="{ left: hoverSeekX + 'px' }">
                     <div class="trim-timer">{{formatTime(hoverSeekTime)}}</div>
@@ -1030,6 +1048,7 @@ watch(() => props.scrollLeft, val => {
     padding: 0px 36px;
     padding-top: 30px;
     background-color: #cfcfcf;
+    position: relative;
 }
 
 .audio-visual
@@ -1039,6 +1058,7 @@ watch(() => props.scrollLeft, val => {
     justify-content: center;
     height: 86px;
     background-color: white;
+    z-index: 10;
 }
 
 .add-audio-label
@@ -1117,7 +1137,7 @@ watch(() => props.scrollLeft, val => {
     inset 0 2px 4px rgba(0, 0, 0, 0.25);
 }
 
-canvas
+.canvas
 {
     position: absolute;
     top: 0;
@@ -1125,6 +1145,16 @@ canvas
     width: 100%;
     height: 100%;
     z-index: 1;
+}
+
+.marker-canvas
+{
+    bottom: 0;
+    top: initial;
+    height: 86px;
+    z-index: 99;
+    pointer-events: none;
+    margin: 0px 36px;
 }
 
 .progress-bar 
@@ -1278,17 +1308,29 @@ border-color: white transparent transparent transparent;
     font-size: 12px;
 }
 
-.move-handle
+.move-handle 
 {
-  position: absolute;
-  top: -10px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 20px;
-  height: 8px;
-  background: #ff6a6a;
-  border-radius: 4px;
-  cursor: grab;
-  user-select: none;
+    position: absolute;
+    top: -10px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 20px;
+    height: 8px;
+    background: #ff6a6a;
+    border-radius: 4px;
+    cursor: grab;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.move-handle::after 
+{
+    content: '';
+    width: 10px;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.5);
+    border-radius: 2px;
 }
 </style>
