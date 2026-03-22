@@ -3,7 +3,8 @@ import { ref, watch, onMounted } from 'vue';
 
 const props = defineProps({
   modelValue: { type: Number, required: true }, //trim timer
-  precision: { type: Number, default: 2 } //timer precision
+  precision: { type: Number, default: 2 }, //timer precision
+  max: { type: Number}
 })
 
 //value of trim input
@@ -48,6 +49,9 @@ function handleKeydown(e)
     if (e.key === "ArrowUp") value += step;
     if (e.key === "ArrowDown") value -= step;
 
+    // ✅ clamp here
+    value = clamp(value, 0, props.max ?? Infinity);
+
     inputValue.value = formatTime(value, props.precision);
     commitEdit();
   }
@@ -84,6 +88,12 @@ function timeToSeconds(timeString)
   const fraction = Number(match[3]) / Math.pow(10, match[3].length);
 
   return minutes * 60 + seconds + fraction;
+}
+
+//helper function to clamp values into restrictions
+function clamp(value, min, max) 
+{
+  return Math.min(Math.max(value, min), max);
 }
 
 // Sync when external value changes (but not while editing)

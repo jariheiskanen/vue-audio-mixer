@@ -3,18 +3,17 @@ TODO:
 - fade audio in/out
 - change speed
 
-- !!! set timelineDuration properly, currently it is base done based on previously added longest one
 - extend timeline when dragging to right side
-- add overflow to audio graph and sync their movement
+- sync audio graph scroll
 - update marker timers to add start offset
 - fix visuals on padding fix
 - smaller timeline doesn't have margin on the right side unless file is dragged there
-- limit trim marker timer to not go past duration of it
-- audio play timer does not stick to trim marker if editing the input manually
+- show zoom level
+- timeline doesn't extend if longer clip is added after shorter one
 
 - save in different formats - wav, mp3 done
 - move from lamejs to ffmpeg.wasm?
-- formatTime is defined in both AudioChannel and TrimInput, consider seperate file
+- formatTime, clamp is defined in both AudioChannel and TrimInput, consider seperate file
 - trimTimer css is defined in both
 
 -->
@@ -218,6 +217,7 @@ function drawMarkers(ctx)
     ctx.textBaseline = 'top';
     ctx.fillStyle = 'white';
 
+
     const dpr = window.devicePixelRatio || 1;
     const height = MarkerRef.value.height / dpr;
     const width = props.timelineDuration * pxPerSecond.value;
@@ -245,10 +245,26 @@ function drawMarkers(ctx)
 
             const label = formatTime(time, 1);
 
+            const padding = 3;
+            // measure text width
+            const textWidth = ctx.measureText(label).width;
+            // default
+            let textX = x;
+            // clamp left
+            if (textX - textWidth / 2 < padding) 
+            {
+                textX = padding + textWidth / 2;
+            }
+            // clamp right
+            if (textX + textWidth / 2 > width - padding) 
+            {
+                textX = width - padding - textWidth / 2;
+            }
+
             ctx.strokeStyle = 'black';
             ctx.lineWidth = 2;
-            ctx.strokeText(label, x + 2, height - 18);
-            ctx.fillText(label, x + 2, height - 18);
+            ctx.strokeText(label, textX, height - 18);
+            ctx.fillText(label, textX, height - 18);
 
             last_drawn_x = x;
         }
@@ -720,6 +736,7 @@ function updateTrim(value, type)
     {
         trimEnd.value = clamp(value, trimStart.value + minGap, audioDuration.value);
     }
+    audioCurrent.value = clamp(audioCurrent.value, trimStart.value, trimEnd.value);
 }
 
 //helper function to clamp values into restrictions
@@ -782,8 +799,8 @@ const showHoverBar = computed(() => {
   return fileAdded.value && hoverVisible.value &&!dragHandle.value && !hoveringHandle.value && hoverSeekTime.value > trimStart.value && hoverSeekTime.value < trimEnd.value;
 })
 
-//play progress in %, used for progress bar
-const playPercent = computed(() => {
+//play progress in px, used for progress bar
+const playBar = computed(() => {
   const container = ContainerRef.value;
   if (!container || audioDuration.value === 0) return 0;
 
@@ -932,7 +949,7 @@ watch(() => props.scrollLeft, val => {
 
                 <div class="trim-overlay left" :style="{ width: startPercent + '%' }" v-if="fileAdded"></div>
                 <div class="trim-handle start" :style="{ left: startPercent + '%' }" draggable="false" @mousedown.stop="startDrag('start')" @mouseenter="hoveringHandle = true" @mouseleave="hoveringHandle = false" v-if="fileAdded">
-                    <TrimMarker v-model="trimStart" :precision="2" @update:modelValue="value => updateTrim(value, 'start')"/>
+                    <TrimMarker v-model="trimStart" :precision="2" :max="trimEnd" @update:modelValue="value => updateTrim(value, 'start')"/>
                 </div>
 
                 <div class="move-handle" @mousedown.stop="moveChannel" @mousemove.stop @click.stop v-if="fileAdded"></div>
@@ -942,10 +959,10 @@ watch(() => props.scrollLeft, val => {
                 <div v-show="showHoverBar" class="progress-bar hover-bar" :style="{ left: hoverSeekX + 'px' }">
                     <div class="trim-timer">{{formatTime(hoverSeekTime)}}</div>
                 </div>
-                <div class="progress-bar" v-if="fileAdded" :style="{ left: playPercent + 'px' }"></div>
+                <div class="progress-bar" v-if="fileAdded" :style="{ left: playBar + 'px' }"></div>
 
                 <div class="trim-handle end" :style="{ left: endPercent + '%' }" draggable="false" @mousedown.stop="startDrag('end')" @mouseenter="hoveringHandle = true" @mouseleave="hoveringHandle = false" v-if="fileAdded">
-                    <TrimMarker v-model="trimEnd" :precision="2" @update:modelValue="value => updateTrim(value, 'end')"/>
+                    <TrimMarker v-model="trimEnd" :precision="2" :max="audioDuration" @update:modelValue="value => updateTrim(value, 'end')"/>
                 </div>
                 <div class="trim-overlay right" :style="{ width: (100 - endPercent) + '%' }" v-if="fileAdded"></div>
             </div>

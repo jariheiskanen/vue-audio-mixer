@@ -32,8 +32,9 @@ const channelCount = computed(() => {
 });
 
 // longest visible timeline
+const MINIMUM_TIMELINE = 10;
 const timelineDuration = computed(() =>
-  Math.max(...channels.value.map(c => c.start + c.duration), 0)
+  Math.max(...channels.value.map(c => c.start + c.duration), MINIMUM_TIMELINE)
 );
 
 //update duration
