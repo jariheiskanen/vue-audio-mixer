@@ -40,13 +40,13 @@ const timelineDuration = computed(() =>
 //update duration
 function updateDuration(index, duration) 
 {
-  channels.value[index].duration = duration;
+  channels.value[index] = {...channels.value[index],duration};
 }
 
 //update starting point (from dragging)
-function updateStart(index, value)
+function updateStart(index, start)
 {
-  channels.value[index].start = value
+  channels.value[index] = {...channels.value[index],start};
 }
 
 function handleWheel(e)

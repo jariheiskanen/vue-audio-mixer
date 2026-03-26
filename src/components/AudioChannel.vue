@@ -9,7 +9,6 @@ TODO:
 - fix visuals on padding fix
 - smaller timeline doesn't have margin on the right side unless file is dragged there
 - show zoom level
-- timeline doesn't extend if longer clip is added after shorter one
 
 - save in different formats - wav, mp3 done
 - move from lamejs to ffmpeg.wasm?
@@ -177,9 +176,8 @@ function setupCanvas(canvas, customWidth = null)
 function drawVolumeGraph(canvas, data) 
 {
     //init canvas
-    const timelineWidth = props.timelineDuration * pxPerSecond.value;
     const ctx = setupCanvas(canvas);
-    const marker_ctx = setupCanvas(MarkerRef.value, timelineWidth);
+    const marker_ctx = setupCanvas(MarkerRef.value, timelineWidthPx.value);
     const width = canvas.width;
     const height = canvas.height;
 
@@ -220,7 +218,7 @@ function drawMarkers(ctx)
 
     const dpr = window.devicePixelRatio || 1;
     const height = MarkerRef.value.height / dpr;
-    const width = props.timelineDuration * pxPerSecond.value;
+    const width = timelineWidthPx.value;
     const duration = props.timelineDuration; //in s  
     const secPerPixel = duration / width; //seconds represented by one pixel  
     const minSeconds = secPerPixel * min_spacing; //minimum seconds between markers
@@ -818,6 +816,10 @@ const widthPx = computed(() => {
     return props.duration * pxPerSecond.value + 'px';
 });
 
+const timelineWidthPx = computed(() => {
+  return props.timelineDuration * pxPerSecond.value;
+});
+
 //how wide one second is, multiplied by zoom
 const basePxPerSecond = 100;
 const pxPerSecond = computed(() => basePxPerSecond * props.zoomLevel);
@@ -841,6 +843,13 @@ watch(() => props.scrollLeft, val => {
     scrollRef.value.scrollLeft = val
   }
 })
+
+watch(
+  () => [props.timelineDuration],
+  () => {
+    redrawCanvas(cutStart.value, cutEnd.value);
+  }
+);
 
 </script>
 
