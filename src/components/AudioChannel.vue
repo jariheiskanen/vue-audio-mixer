@@ -5,9 +5,7 @@ TODO:
 
 - extend timeline when dragging to right side
 - sync audio graph scroll
-- update marker timers to add start offset
 - fix visuals on padding fix
-- smaller timeline doesn't have margin on the right side unless file is dragged there
 - show zoom level
 
 - save in different formats - wav, mp3 done
@@ -80,6 +78,8 @@ const cutEnd = ref(0); //end of cut file in s
 //channel drag
 const channelDragging = ref(false);
 const channelX = ref(false);
+
+const PADDING = 36;
 
 let animationId = null; //used for audio progress animation
 let animationId2 = null; //used for timer progress
@@ -218,9 +218,12 @@ function drawMarkers(ctx)
 
     const dpr = window.devicePixelRatio || 1;
     const height = MarkerRef.value.height / dpr;
-    const width = timelineWidthPx.value;
+    //const width = timelineWidthPx.value;
+    const fullWidth = timelineWidthPx.value;
+    const usableWidth = fullWidth - PADDING * 2;
     const duration = props.timelineDuration; //in s  
-    const secPerPixel = duration / width; //seconds represented by one pixel  
+    //const secPerPixel = duration / width; //seconds represented by one pixel  
+    const secPerPixel = duration / usableWidth; //seconds represented by one pixel  
     const minSeconds = secPerPixel * min_spacing; //minimum seconds between markers
 
     // choose a logical interval for user
@@ -230,7 +233,7 @@ function drawMarkers(ctx)
 
     for(let time=0; time<=duration; time += interval)
     {
-        const x = (time/duration) * width;
+        const x = PADDING + (time/duration) * usableWidth;
         if(last_drawn_x + min_spacing <= x)
         {
             ctx.strokeStyle = 'rgba(255,255,255,0.8)';
@@ -254,9 +257,9 @@ function drawMarkers(ctx)
                 textX = padding + textWidth / 2;
             }
             // clamp right
-            if (textX + textWidth / 2 > width - padding) 
+            if (textX + textWidth / 2 > fullWidth - padding) 
             {
-                textX = width - padding - textWidth / 2;
+                textX = fullWidth - padding - textWidth / 2;
             }
 
             ctx.strokeStyle = 'black';
@@ -407,23 +410,19 @@ function setDuration(e)
 }
 
 // Format seconds to mm:ss.M or mm:ss.MM
-function formatTime(sec, precision = 1) {
-    sec = Number(sec);
+function formatTime(sec, precision = 1) 
+{
+    sec = Math.max(0, Number(sec)); // avoid negatives
 
-    if(sec >= 0) 
-    {
-        const minutes = Math.floor(sec / 60);
-        const seconds = Math.floor(sec % 60);
+    const factor = Math.pow(10, precision);
+    const total = Math.round(sec * factor); // total time in fractional units
+    const totalSeconds = Math.floor(total / factor); // integer seconds
+    const fraction = total % factor; // remainder for fraction
 
-        const fractionMultiplier = Math.pow(10, precision);
-        const fraction = Math.floor((sec % 1) * fractionMultiplier).toString().padStart(precision, '0');
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
 
-        return `${minutes}:${seconds.toString().padStart(2, '0')}.${fraction}`;
-    } 
-    else 
-    {
-        return precision === 2 ? "0:00.00" : "0:00.0";
-    }
+    return `${minutes}:${seconds.toString().padStart(2, '0')}.${fraction.toString().padStart(precision, '0')}`;
 }
 
 //start drag on trim handle
@@ -692,8 +691,9 @@ function setTime(timeSec)
     //clamp time inside cut/trim limits
     const absoluteMin = cutStart.value + trimStart.value;
     const absoluteMax = cutStart.value + trimEnd.value;
-    const clamped = Math.min(Math.max(timeSec, absoluteMin), absoluteMax);
+    let clamped = Math.min(Math.max(timeSec, absoluteMin), absoluteMax);
 
+    clamped = Number(clamped.toFixed(3));
     AudioRef.value.currentTime = clamped;
     audioCurrent.value = clamped - cutStart.value;
 }
@@ -713,13 +713,25 @@ function skipEnd()
 //skips audio backwards
 function skipBackward()
 {
-    setTime(AudioRef.value.currentTime - 0.1);
+    const step = 0.1;
+    let current = AudioRef.value.currentTime;
+    let newTime = current - step;
+
+    //prevent value drifting
+    newTime = Math.round(newTime / step) * step;
+    setTime(Number(newTime.toFixed(3)));
 }
 
 //skips audio forward
 function skipForward()
 {
-    setTime(AudioRef.value.currentTime + 0.1);
+    const step = 0.1;
+    let current = AudioRef.value.currentTime;
+    let newTime = current + step;
+
+    //prevent value drifting
+    newTime = Math.round(newTime / step) * step;
+    setTime(Number(newTime.toFixed(3)));
 }
 
 //keep trim inside trim values
@@ -808,7 +820,7 @@ const playBar = computed(() => {
 //pixel based audio graph calculation
 const leftPx = computed(() => {
     if (!props.timelineDuration || !props.duration) return "0%";
-    return props.start * pxPerSecond.value + 'px';
+    return PADDING + props.start * pxPerSecond.value + 'px';
 });
 
 const widthPx = computed(() => {
@@ -817,8 +829,8 @@ const widthPx = computed(() => {
 });
 
 const timelineWidthPx = computed(() => {
-  return props.timelineDuration * pxPerSecond.value;
-});
+  return props.timelineDuration * pxPerSecond.value + PADDING*2;
+}); 
 
 //how wide one second is, multiplied by zoom
 const basePxPerSecond = 100;
@@ -1071,7 +1083,7 @@ watch(
 .audio-visual-wrap
 {
     overflow-x: auto;
-    padding: 0px 36px;
+    /*padding: 0px 36px;*/
     padding-top: 30px;
     background-color: #cfcfcf;
     position: relative;
@@ -1180,7 +1192,7 @@ watch(
     height: 86px;
     z-index: 99;
     pointer-events: none;
-    margin: 0px 36px;
+    /*margin: 0px 36px;*/
 }
 
 .progress-bar 
