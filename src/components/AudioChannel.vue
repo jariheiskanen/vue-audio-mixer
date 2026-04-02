@@ -4,9 +4,9 @@ TODO:
 - change speed
 
 - extend timeline when dragging to right side
-- sync audio graph scroll
 - fix visuals on padding fix
-- show zoom level
+- show props.start timer and make it editable
+- add master download button to download merged files
 
 - save in different formats - wav, mp3 done
 - move from lamejs to ffmpeg.wasm?
@@ -34,7 +34,8 @@ const props = defineProps({
   timelineDuration: Number,
   start: Number,
   duration: Number,
-  zoomLevel: Number
+  zoomLevel: Number,
+  scrollLeft: Number
 })
 
 const emit = defineEmits(['file-added', 'update:start', 'duration', 'scroll:graph']);
@@ -44,7 +45,7 @@ const AudioRef = ref(null);
 const CanvasRef = ref(null);
 const MarkerRef = ref(null);
 const ContainerRef = ref(null);
-const scrollRef = ref(null);
+const ScrollRef = ref(null);
 const audioCtx = new AudioContext();
 const gainNode = ref(null);
 const AudioBuffer = ref(null);
@@ -78,8 +79,13 @@ const cutEnd = ref(0); //end of cut file in s
 //channel drag
 const channelDragging = ref(false);
 const channelX = ref(false);
+const autoScrollDir = ref(0); // -1 left, 1 right, 0 none
+const autoScrollActive = ref(false);
+const lastMouseX = ref(0);
 
-const PADDING = 36;
+const PADDING = 36; //padding of timeline
+const EDGE_THRESHOLD = 50; //px from edge
+const SCROLL_SPEED = 10;   //px per frame
 
 let animationId = null; //used for audio progress animation
 let animationId2 = null; //used for timer progress
@@ -761,6 +767,7 @@ function moveChannel(e)
   channelDragging.value = true;
   const rect = ContainerRef.value.getBoundingClientRect();
   channelX.value = e.clientX - rect.left;
+  startAutoScroll();
 
   window.addEventListener("mousemove", onMoveChannel);
   window.addEventListener("mouseup", stopMoveChannel);
@@ -770,8 +777,43 @@ function onMoveChannel(e)
 {
     if (!channelDragging.value) return;
 
+    //scroll on edge logic
+    const container = ScrollRef.value;
+    const scroll_rect = container.getBoundingClientRect();
+    const mouseX = e.clientX;
+    lastMouseX.value = mouseX;
+
+    if (mouseX > scroll_rect.right - EDGE_THRESHOLD)
+    {
+        autoScrollDir.value = 1;
+    }
+    else if (mouseX < scroll_rect.left + EDGE_THRESHOLD)
+    {
+        autoScrollDir.value = -1;
+    }
+    else
+    {
+        autoScrollDir.value = 0;
+    }
+
+    // drag logic
+    updateDragPosition();
+}
+
+function stopMoveChannel()
+{
+    channelDragging.value = false;
+    autoScrollActive.value = false;
+    autoScrollDir.value = 0;
+    window.removeEventListener("mousemove", onMoveChannel);
+    window.removeEventListener("mouseup", stopMoveChannel);
+}
+
+//update location of graph
+function updateDragPosition()
+{
     const rect = ContainerRef.value.getBoundingClientRect();
-    const currentX = e.clientX - rect.left;
+    const currentX = lastMouseX.value - rect.left;
     const dx = currentX - channelX.value;
 
     const secondsMoved = dx / pxPerSecond.value;
@@ -779,14 +821,29 @@ function onMoveChannel(e)
     const maxStart = props.timelineDuration - props.duration;
     const clampedStart = clamp(newStart, 0, maxStart);
 
-    emit("update:start", Math.max(0, clampedStart));
+    emit("update:start", clampedStart);
 }
 
-function stopMoveChannel()
+//animate scrolling on edge hover
+function startAutoScroll()
 {
-  channelDragging.value = false;
-  window.removeEventListener("mousemove", onMoveChannel);
-  window.removeEventListener("mouseup", stopMoveChannel);
+    if (autoScrollActive.value) return;
+    autoScrollActive.value = true;
+
+    function loop()
+    {
+        if (!autoScrollActive.value) return;
+
+        if (autoScrollDir.value !== 0)
+        {
+            ScrollRef.value.scrollLeft += autoScrollDir.value * SCROLL_SPEED;
+            updateDragPosition();
+        }
+
+        requestAnimationFrame(loop);
+    }
+
+    requestAnimationFrame(loop);
 }
 
 //syncs scrolling
@@ -850,11 +907,17 @@ onBeforeUnmount(() => {
   resizeObserver.disconnect();
 });
 
-watch(() => props.scrollLeft, val => {
-  if (scrollRef.value && scrollRef.value.scrollLeft !== val) {
-    scrollRef.value.scrollLeft = val
+watch(
+  () => props.scrollLeft,
+  (val) => {
+    if (!ScrollRef.value) return;
+
+    // prevent feedback loop
+    if (ScrollRef.value.scrollLeft !== val) {
+      ScrollRef.value.scrollLeft = val;
+    }
   }
-})
+);
 
 watch(
   () => [props.timelineDuration],
@@ -960,7 +1023,7 @@ watch(
                 <VolumeControl v-model="audioVolume" @update:modelValue="changeVolume"/>
             </div>
         </div>
-        <div class="audio-visual-wrap" ref="scrollRef" @scroll="handleScroll">
+        <div class="audio-visual-wrap" ref="ScrollRef" @scroll="handleScroll">
             <canvas ref="MarkerRef" class="canvas marker-canvas" v-if="fileAdded"></canvas>
             <div ref="ContainerRef" class="audio-visual" @click="seek" @mousemove="hoverSeek" @mouseleave="hoverLeave" :style="{left: leftPx,width: widthPx}">
                 <label v-show="showUpload" class="add-audio-label"><div class="circle">+</div>
