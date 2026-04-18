@@ -6,7 +6,7 @@ TODO:
 - extend timeline when dragging to right side
 - fix visuals on padding fix
 - show props.start timer and make it editable
-- add master download button to download merged files
+- test download button functionality in different scenarios
 
 - save in different formats - wav, mp3 done
 - move from lamejs to ffmpeg.wasm?
@@ -38,7 +38,7 @@ const props = defineProps({
   scrollLeft: Number
 })
 
-const emit = defineEmits(['file-added', 'update:start', 'duration', 'scroll:graph']);
+const emit = defineEmits(['file-added', 'update:start', 'update:volume','duration', 'scroll:graph','update:trimStart','update:trimEnd']);
 
 const fileRef = ref(null);
 const AudioRef = ref(null);
@@ -311,6 +311,7 @@ async function handleFile(e)
 function changeVolume(e)
 {
     gainNode.value.gain.value = Number(e);
+    emit('update:volume', Number(e));
 }
 
 //plays/pauses audio
@@ -531,6 +532,10 @@ async function cutFile()
     audioCurrent.value = 0;
     trimStart.value = 0;
     trimEnd.value = audioDuration.value;    
+
+
+    emit('update:trimStart', cutStart.value);
+    emit('update:trimEnd', cutEnd.value);
 }
 
 //initialize audio context for volume editing
